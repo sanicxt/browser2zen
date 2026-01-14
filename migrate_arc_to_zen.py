@@ -116,14 +116,25 @@ class Arc2ZenMigrator:
 
         return running_browsers, len(running_browsers) > 0
 
-    def run_migration(self, dry_run: bool = False, zen_profile_name: Optional[str] = None, arc_space_name: Optional[str] = None, import_open_tabs: bool = False) -> bool:
+    def run_migration(
+        self,
+        dry_run: bool = False,
+        zen_profile_name: Optional[str] = None,
+        arc_space_name: Optional[str] = None,
+        import_open_tabs: bool = False,
+        no_containers: bool = False,
+    ) -> bool:
         """Run the complete Arc to Zen migration process."""
 
         print("🔄 Arc to Zen Browser Migration v1.2 (2025-09-29)")
         print("=" * 50)
 
         logger.info("Starting Arc to Zen migration")
-        logger.info(f"Options: dry_run={dry_run}, zen_profile={zen_profile_name}, arc_space={arc_space_name}, import_open_tabs={import_open_tabs}")
+        logger.info(
+            f"Options: dry_run={dry_run}, zen_profile={zen_profile_name}, "
+            f"arc_space={arc_space_name}, import_open_tabs={import_open_tabs}, "
+            f"no_containers={no_containers}"
+        )
 
         # Clean up any previous export file to prevent caching issues
         if self.temp_export_file.exists():
@@ -246,26 +257,36 @@ class Arc2ZenMigrator:
         zen_space_importer = ZenSpaceImporter(zen_profile)
 
         # Import spaces and get container mappings
-        container_mappings = zen_space_importer.import_arc_spaces_as_containers(arc_export_data, dry_run=dry_run)
-
-        # In dry run, container_mappings will be empty, but that's expected
-        if dry_run:
+        if no_containers:
+            print("  🚫 No container assignment (regular browsing context)")
+            # Use container ID 0 (no container) for all spaces
+            container_mappings = {}
+            for space in arc_export_data.get('spaces', []):
+                space_name = space['space_name']
+                container_mappings[space_name] = 0  # No container
             space_success = True
-            # Create mock container mappings for dry run
-            container_mappings = {}
-            for space in arc_export_data.get('spaces', []):
-                space_name = space['space_name']
-                container_mappings[space_name] = 1  # Default container
         else:
-            space_success = container_mappings is not None and len(container_mappings) > 0
+            print("  🔒 Creating separate containers for each Arc space (cookie isolation)")
+            container_mappings = zen_space_importer.import_arc_spaces_as_containers(arc_export_data, dry_run=dry_run)
 
-        if not space_success:
-            print("⚠️ Failed to create Zen workspaces, but continuing with import...")
-            # Use default container mappings as fallback
-            container_mappings = {}
-            for space in arc_export_data.get('spaces', []):
-                space_name = space['space_name']
-                container_mappings[space_name] = 1  # Default container
+            # In dry run, container_mappings will be empty, but that's expected
+            if dry_run:
+                space_success = True
+                # Create mock container mappings for dry run
+                container_mappings = {}
+                for space in arc_export_data.get('spaces', []):
+                    space_name = space['space_name']
+                    container_mappings[space_name] = 1  # Default container
+            else:
+                space_success = container_mappings is not None and len(container_mappings) > 0
+
+            if not space_success:
+                print("⚠️ Failed to create Zen workspaces, but continuing with import...")
+                # Use default container mappings as fallback
+                container_mappings = {}
+                for space in arc_export_data.get('spaces', []):
+                    space_name = space['space_name']
+                    container_mappings[space_name] = 1  # Default container
 
         # Detect Zen storage format: modern (zen-sessions.jsonlz4) vs legacy (SQLite tables)
         uses_sessions = (selected_zen_profile / "zen-sessions.jsonlz4").exists()
@@ -410,6 +431,12 @@ Examples:
         help='Enable verbose logging output'
     )
 
+    parser.add_argument(
+        '--no-containers',
+        action='store_true',
+        help='Do not assign any container to tabs (container ID 0 - regular browsing). By default, separate containers are created for each Arc space. You can manually assign containers later in Zen.'
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -423,7 +450,8 @@ Examples:
             dry_run=args.dry_run,
             zen_profile_name=args.zen_profile,
             arc_space_name=args.arc_space,
-            import_open_tabs=args.open_tabs
+            import_open_tabs=args.open_tabs,
+            no_containers=args.no_containers,
         )
 
         if success and not args.dry_run:
