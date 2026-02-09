@@ -49,7 +49,7 @@ class ZenSessionstoreManager:
                 data = f.read()
 
             # Check Mozilla LZ4 header
-            if not data.startswith(b'mozLz40\\0'):
+            if not data.startswith(b'mozLz40\0'):
                 raise ValueError("Not a Mozilla LZ4 file")
 
             # Skip header (8 bytes) and length (4 bytes)
@@ -72,10 +72,10 @@ class ZenSessionstoreManager:
             json_data = json.dumps(session_data, separators=(',', ':')).encode('utf-8')
 
             # Compress with LZ4
-            compressed = lz4.block.compress(json_data)
+            compressed = lz4.block.compress(json_data, store_size=False)
 
             # Create Mozilla header
-            header = b'mozLz40\\0'
+            header = b'mozLz40\0'
             length = len(json_data).to_bytes(4, 'little')
 
             # Write complete file

@@ -19,7 +19,10 @@ git clone https://github.com/rafcabezas/arc2zen.git
 cd arc2zen
 ```
 
-2. No additional dependencies required! Uses only Python standard library.
+2. Install the required dependency:
+```bash
+pip install lz4
+```
 
 ### Basic Usage
 
@@ -40,7 +43,7 @@ python3 migrate_arc_to_zen.py --arc-space "Personal" --dry-run
 
 ```bash
 # Migrate with custom settings
-python3 migrate_arc_to_zen.py --min-visits 5 --zen-profile "Default" --verbose
+python3 migrate_arc_to_zen.py --zen-profile "Default" --verbose
 
 # Migrate only a specific Arc space
 python3 migrate_arc_to_zen.py --arc-space "Personal"
@@ -77,14 +80,8 @@ python3 src/zen_workspace_mapper.py
 ```
 This creates a mapping guide showing which Zen workspace UUID corresponds to each Arc space.
 
-### Step 3: Import Pinned Tabs
-Pinned tabs are imported into Zen's `zen_pins` table with proper:
-- Workspace UUID assignment
-- Folder hierarchy preservation
-- Position ordering
-
-### Step 4: Create Workspaces
-Zen workspaces are created in the `zen_workspaces` table with proper container assignments and Arc space icons preserved as Unicode emojis.
+### Step 3: Import Pinned Tabs & Workspaces
+For **Zen 1.18+**, spaces, pinned tabs, and folders are written directly to `zen-sessions.jsonlz4` — the modern storage format for Zen's sidebar. For older Zen versions, the tool falls back to the legacy `zen_pins` and `zen_workspaces` SQLite tables.
 
 ## 🛡️ Safety Features
 
@@ -97,15 +94,22 @@ Zen workspaces are created in the `zen_workspaces` table with proper container a
 
 ```
 arc2zen/
-├── migrate_arc_to_zen.py          # Main migration script
+├── migrate_arc_to_zen.py              # Main migration script
+├── requirements.txt                   # Python dependencies (lz4)
 ├── src/
-│   ├── arc_pinned_tab_extractor.py # Extract Arc pinned tabs
-│   ├── zen_pinned_tab_importer.py  # Import tabs to Zen
-│   ├── zen_workspace_importer.py   # Create Zen workspaces
-│   ├── zen_workspace_mapper.py     # Map Arc spaces to Zen workspaces
-│   └── zen_schema_analyzer.py      # Analyze Zen database schema
-├── .gitignore                     # Excludes generated files
-└── README.md                      # This file
+│   ├── arc_pinned_tab_extractor.py    # Extract Arc pinned tabs
+│   ├── arc_bookmark_extractor.py      # Extract Arc bookmarks
+│   ├── arc_profile_discovery.py       # Locate Arc profiles
+│   ├── zen_sessions_importer.py       # Import to zen-sessions.jsonlz4 (Zen 1.18+)
+│   ├── zen_sessionstore_manager.py    # Read/write mozlz4 sessionstore
+│   ├── zen_pinned_tab_importer.py     # Legacy: import tabs to zen_pins table
+│   ├── zen_workspace_importer.py      # Legacy: create zen_workspaces entries
+│   ├── zen_space_importer.py          # Create Zen containers for spaces
+│   ├── zen_bookmark_importer.py       # Backup import as Firefox bookmarks
+│   ├── zen_workspace_mapper.py        # Map Arc spaces to Zen workspaces
+│   └── zen_schema_analyzer.py         # Analyze Zen database schema
+├── .gitignore                         # Excludes generated files
+└── README.md                          # This file
 ```
 
 ## 🔍 Detailed Usage
@@ -144,7 +148,6 @@ python3 src/zen_pinned_tab_importer.py --dry-run
 ### Command Line Options
 
 - `--dry-run` - Test migration without making changes
-- `--min-visits N` - Only migrate bookmarks with N+ visits (default: 2)
 - `--zen-profile NAME` - Specify target Zen profile name
 - `--arc-space NAME` - Migrate only a specific Arc space by name (case-insensitive partial matching). If not specified, all spaces are migrated.
 - `--verbose` - Enable detailed debug logging
@@ -172,7 +175,7 @@ The tool creates several files during migration (all excluded from git):
 ### Space Icon Migration
 **✅ Implemented**: Arc space icons migrate to Zen workspaces as Unicode emojis.
 
-**Technical Solution**: Extracts Unicode emojis from Arc's `customInfo.iconType.emoji_v2` field and stores them in Zen's `zen_workspaces.icon` column.
+**Technical Solution**: Extracts Unicode emojis from Arc's `customInfo.iconType.emoji_v2` field and preserves them in Zen workspace definitions.
 
 **Result**: Arc space icons (🏠, 🌳, 🎬, ⚖️, etc.) appear as visual icons in Zen workspaces.
 
@@ -248,12 +251,16 @@ If anything goes wrong:
 ### Zen Browser Structure
 - **Location**: `~/Library/Application Support/zen/Profiles/[profile]/`
 - **Format**: Firefox-based
-- **Key Files**: `places.sqlite` (bookmarks database), `prefs.js` (preferences)
+- **Key Files**:
+  - `zen-sessions.jsonlz4` (Zen 1.18+: spaces, pinned tabs, folders)
+  - `places.sqlite` (bookmarks database)
+  - `containers.json` (workspace container definitions)
+  - `prefs.js` (preferences)
 
-### Database Schema
-- **zen_pins** table: Stores pinned tabs with workspace UUIDs
-- **zen_workspaces** table: Manages workspace definitions
-- **moz_places** table: Standard Firefox bookmarks storage
+### Storage Formats
+- **Zen 1.18+**: `zen-sessions.jsonlz4` — mozlz4-compressed JSON containing spaces, tabs, and folders
+- **Legacy Zen**: `zen_pins` and `zen_workspaces` SQLite tables in `places.sqlite`
+- **Bookmarks**: Standard Firefox `moz_bookmarks`/`moz_places` tables (used as backup)
 
 ## 🤝 Contributing
 

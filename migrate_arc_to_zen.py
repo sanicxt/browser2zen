@@ -6,7 +6,7 @@ Complete migration orchestrator that handles the full Arc → Zen bookmark migra
 This is the main entry point for the migration.
 
 Usage:
-    python3 migrate_arc_to_zen.py [--dry-run] [--min-visits 2] [--zen-profile NAME]
+    python3 migrate_arc_to_zen.py [--dry-run] [--zen-profile NAME] [--arc-space NAME]
 """
 
 import argparse
@@ -26,6 +26,7 @@ from zen_bookmark_importer import ZenBookmarkImporter
 from zen_space_importer import ZenSpaceImporter, ZenProfile
 from zen_pinned_tab_importer import ZenPinnedTabImporter
 from zen_workspace_importer import ZenWorkspaceImporter
+from zen_sessions_importer import ZenSessionsImporter
 
 # Set up logging
 logging.basicConfig(
@@ -256,17 +257,26 @@ class Arc2ZenMigrator:
                 space_name = space['space_name']
                 container_mappings[space_name] = 1  # Default container
 
-        # Step 4b: Import as pinned tabs (actual pinned tabs, not bookmarks)
-        print("\n📌 Step 4b: Importing as pinned tabs...")
-        pinned_tab_importer = ZenPinnedTabImporter(selected_zen_profile)
-        workspace_mappings = pinned_tab_importer.import_arc_pinned_tabs(arc_export_data, container_mappings, dry_run=dry_run)
-        # For dry run, workspace_mappings is empty dict, but that's expected
-        pinned_success = workspace_mappings is not None  # Success if we got workspace mappings (even empty for dry run)
+        # Detect Zen storage format: modern (zen-sessions.jsonlz4) vs legacy (SQLite tables)
+        uses_sessions = (selected_zen_profile / "zen-sessions.jsonlz4").exists()
 
-        # Step 4c: Create actual Zen workspaces for each Arc space
-        print("\n🏗️  Step 4c: Creating actual Zen workspaces...")
-        workspace_importer = ZenWorkspaceImporter(selected_zen_profile)
-        workspace_success = workspace_importer.import_arc_workspaces(arc_export_data, container_mappings, workspace_mappings, dry_run=dry_run)
+        if uses_sessions:
+            # Zen 1.18+: Import spaces, pinned tabs, and folders into zen-sessions.jsonlz4
+            print("\n📌 Step 4b: Importing pinned tabs and workspaces (modern format)...")
+            sessions_importer = ZenSessionsImporter(selected_zen_profile)
+            sessions_success = sessions_importer.import_arc_data(arc_export_data, container_mappings, dry_run=dry_run)
+            pinned_success = sessions_success
+            workspace_success = sessions_success
+        else:
+            # Legacy: Write to zen_pins and zen_workspaces SQLite tables
+            print("\n📌 Step 4b: Importing as pinned tabs (legacy format)...")
+            pinned_tab_importer = ZenPinnedTabImporter(selected_zen_profile)
+            workspace_mappings = pinned_tab_importer.import_arc_pinned_tabs(arc_export_data, container_mappings, dry_run=dry_run)
+            pinned_success = workspace_mappings is not None
+
+            print("\n🏗️  Step 4c: Creating actual Zen workspaces...")
+            workspace_importer = ZenWorkspaceImporter(selected_zen_profile)
+            workspace_success = workspace_importer.import_arc_workspaces(arc_export_data, container_mappings, workspace_mappings, dry_run=dry_run)
 
         # Step 4d: Import as bookmarks (for backup/organization)
         print("\n📚 Step 4d: Importing as bookmarks...")
@@ -299,20 +309,19 @@ class Arc2ZenMigrator:
     def show_summary(self):
         """Show migration summary and recommendations."""
         print("\n📋 Post-Migration Notes:")
-        print("🎯 WORKSPACES:")
-        print("• Zen workspaces (containers) created for each Arc space")
-        print("• You can now access workspaces via the Zen sidebar")
-        print("• Each workspace maintains separate tabs and history")
+        print("🎯 WORKSPACES & PINNED TABS:")
+        print("• Zen workspaces created for each Arc space")
+        print("• Pinned tabs imported directly into each workspace")
+        print("• Folder hierarchy preserved with nested structure")
         print()
         print("📚 BOOKMARKS:")
         print("• Arc pinned tabs also imported as bookmarks for backup")
         print("• Bookmarks are organized by space in 'Unfiled Bookmarks'")
-        print("• Original folder structure preserved (e.g., 'Finances' folder)")
+        print("• You can delete the bookmark folders if desired")
         print()
         print("💡 NEXT STEPS:")
-        print("• Open each workspace and manually pin your important tabs")
-        print("• You can now delete the bookmark folders if desired")
-        print("• A database backup was created before import")
+        print("• Restart Zen browser to see your imported data")
+        print("• A backup was created before import (restore if needed)")
 
 
 def main():
