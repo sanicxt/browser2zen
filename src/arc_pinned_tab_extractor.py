@@ -46,18 +46,32 @@ class ArcFolder:
     index: int  # Position in Arc sidebar
 
 @dataclass
+class ArcOpenTab:
+    """Represents an open (unpinned) tab from Arc."""
+    url: str
+    title: str
+    space_id: str
+    space_name: str
+    tab_id: str
+    index: int
+
+    def to_dict(self) -> Dict:
+        return asdict(self)
+
+@dataclass
 class ArcSpace:
-    """Represents an Arc space with its pinned tabs and folders."""
+    """Represents an Arc space with its pinned tabs, open tabs, and folders."""
     space_id: str
     space_name: str
     pinned_tabs: List[ArcPinnedTab]
     folders: List[ArcFolder]
-    icon: Optional[str] = None  # Emoji icon from Arc space
-    color: Optional[dict] = None  # RGB color from Arc space theme
+    open_tabs: List[ArcOpenTab]
+    icon: Optional[str] = None
+    color: Optional[dict] = None
 
     def __str__(self):
         icon_str = f" ({self.icon})" if self.icon else ""
-        return f"ArcSpace(name='{self.space_name}'{icon_str}, tabs={len(self.pinned_tabs)}, folders={len(self.folders)})"
+        return f"ArcSpace(name='{self.space_name}'{icon_str}, pinned={len(self.pinned_tabs)}, open={len(self.open_tabs)}, folders={len(self.folders)})"
 
 
 class ArcPinnedTabExtractor:
@@ -308,18 +322,43 @@ class ArcPinnedTabExtractor:
 
                             # Start recursive processing with top-level display order
                             process_items_recursive(display_order)
+                            
+                            # Also extract unpinned (open) tabs
+                            unpinned_order = self._get_unpinned_tab_order(space_id, items_lookup, data)
+                            open_tabs = []
+                            open_index = 0
+                            for item_id in unpinned_order:
+                                item_data = items_lookup.get(item_id, {})
+                                if not item_data:
+                                    continue
+                                data_section = item_data.get('data', {})
+                                if 'tab' in data_section:
+                                    tab_info = data_section['tab']
+                                    url = tab_info.get('savedURL', '')
+                                    title = item_data.get('title') or tab_info.get('savedTitle', 'Untitled')
+                                    if url:
+                                        open_tab = ArcOpenTab(
+                                            url=url,
+                                            title=title,
+                                            space_id=space_id,
+                                            space_name=space_name,
+                                            tab_id=item_id,
+                                            index=open_index
+                                        )
+                                        open_tabs.append(open_tab)
+                                        open_index += 1
                         else:
                             # Fallback to old method if display order not found
                             pinned_tabs = pinned_tabs_by_space.get(space_id, [])
                             folders = folders_by_space.get(space_id, [])
+                            open_tabs = []
                             # Sort by original index as fallback
                             pinned_tabs.sort(key=lambda tab: tab.index)
                             folders.sort(key=lambda folder: folder.index)
 
-                        if pinned_tabs or folders:
-                            logger.info(f"  ✅ {space_name}: {len(pinned_tabs)} pinned tabs, {len(folders)} folders")
-                            space_color = space_info.get('color')
-                            arc_spaces.append(ArcSpace(space_id, space_name, pinned_tabs, folders, space_icon, space_color))
+                        logger.info(f"  ✅ {space_name}: {len(pinned_tabs)} pinned tabs, {len(open_tabs)} open tabs, {len(folders)} folders")
+                        space_color = space_info.get('color')
+                        arc_spaces.append(ArcSpace(space_id, space_name, pinned_tabs, folders, open_tabs, space_icon, space_color))
             else:
                 # Fallback to original method if sidebar spaces not found
                 for space_id, space_info in spaces_info.items():
@@ -327,14 +366,14 @@ class ArcPinnedTabExtractor:
                     space_icon = space_info['icon']
                     pinned_tabs = pinned_tabs_by_space[space_id]
                     folders = folders_by_space[space_id]
+                    open_tabs = []
 
-                    if pinned_tabs:
-                        # Sort pinned tabs and folders by their original index to preserve order
-                        pinned_tabs.sort(key=lambda tab: tab.index)
-                        folders.sort(key=lambda folder: folder.index)
-                        logger.info(f"  ✅ {space_name}: {len(pinned_tabs)} pinned tabs, {len(folders)} folders")
-                        space_color = space_info.get('color')
-                        arc_spaces.append(ArcSpace(space_id, space_name, pinned_tabs, folders, space_icon, space_color))
+                    # Sort pinned tabs and folders by their original index to preserve order
+                    pinned_tabs.sort(key=lambda tab: tab.index)
+                    folders.sort(key=lambda folder: folder.index)
+                    logger.info(f"  ✅ {space_name}: {len(pinned_tabs)} pinned tabs, {len(open_tabs)} open tabs, {len(folders)} folders")
+                    space_color = space_info.get('color')
+                    arc_spaces.append(ArcSpace(space_id, space_name, pinned_tabs, folders, open_tabs, space_icon, space_color))
 
         # Extract Essential tabs and distribute them to their appropriate workspaces
         essential_tabs_by_space = self._extract_essential_tabs_distributed(data, spaces_info)
@@ -617,9 +656,8 @@ class ArcPinnedTabExtractor:
         if parent_id in items_lookup:
             return self._is_in_unpinned_container(parent_id, items_lookup, data)
 
-        # If the parent is not in items (it's a container), check if it's unpinned by checking
-        # all spaces to see if any space has this parent_id in its containerIDs and
-        # if it's positioned after "unpinned" in the list
+        # If the parent is not in items (it's a container), check if it's the unpinned container
+        # by checking if it immediately follows the 'unpinned' marker in containerIDs
         containers = data.get('sidebar', {}).get('containers', [])
         if len(containers) > 1 and 'spaces' in containers[1]:
             spaces = containers[1]['spaces']
@@ -630,79 +668,92 @@ class ArcPinnedTabExtractor:
                     container_ids = space_data.get('containerIDs', [])
 
                     if parent_id in container_ids:
-                        # Check if this container comes after "unpinned" in the list
+                        # Check if this container immediately follows 'unpinned' marker
                         try:
-                            unpinned_index = container_ids.index('unpinned')
-                            parent_index = container_ids.index(parent_id)
-                            # If parent comes after unpinned, it's likely an unpinned container
-                            return parent_index > unpinned_index
+                            unpinned_idx = container_ids.index('unpinned')
+                            if unpinned_idx + 1 < len(container_ids) and container_ids[unpinned_idx + 1] == parent_id:
+                                return True
                         except ValueError:
-                            # If no "unpinned" found, assume it's pinned
-                            return False
+                            pass
+                        return False
 
         return False
 
     def _get_space_display_order(self, space_id: str, items_lookup: Dict, data: Dict) -> List[str]:
-        """Get the display order of items in a space using container childrenIds."""
-        # Get space's container IDs
+        """Get the display order of items in a space using container childrenIds.
+        
+        The containerIDs array contains markers ('pinned', 'unpinned') followed by
+        their respective container UUIDs. The order of markers can vary, so we
+        identify containers by which marker immediately precedes them.
+        """
         space_container_ids = self._get_space_container_ids(space_id, data)
         if not space_container_ids:
             return []
 
-        # Look for containers with childrenIds in the items data
         containers = data.get('sidebar', {}).get('containers', [])
         if len(containers) > 1 and 'items' in containers[1]:
             items = containers[1]['items']
 
-            # Check each container ID to find the best one with childrenIds
-            # Prefer containers that come after 'pinned' in the containerIDs list
-            pinned_containers = []
-            unpinned_containers = []
+            # Find the container UUID that comes immediately after the 'pinned' marker
+            pinned_container_uuid = None
+            for idx, cid in enumerate(space_container_ids):
+                if cid == 'pinned' and idx + 1 < len(space_container_ids):
+                    next_cid = space_container_ids[idx + 1]
+                    if next_cid not in ('pinned', 'unpinned'):
+                        pinned_container_uuid = next_cid
+                    break
 
-            try:
-                pinned_index = space_container_ids.index('pinned')
-                unpinned_index = space_container_ids.index('unpinned')
-            except ValueError:
-                # Fallback if no pinned/unpinned markers found
-                pinned_index = len(space_container_ids)
-                unpinned_index = -1
-
-            for idx, container_id in enumerate(space_container_ids):
-                if container_id in ['pinned', 'unpinned']:  # Skip logical containers
-                    continue
-
-                # Look for this container UUID in items
+            if pinned_container_uuid:
+                # Look up this container in items to get its childrenIds
                 for i in range(0, len(items), 2):
-                    if i + 1 < len(items) and items[i] == container_id:
-                        container_data = items[i + 1]
-                        children_ids = container_data.get('childrenIds', [])
+                    if i + 1 < len(items) and items[i] == pinned_container_uuid:
+                        children_ids = items[i + 1].get('childrenIds', [])
                         if children_ids:
-                            # Categorize based on position relative to pinned/unpinned
-                            if idx > pinned_index:
-                                pinned_containers.append(children_ids)
-                            elif idx > unpinned_index:
-                                unpinned_containers.append(children_ids)
+                            return children_ids
                         break
 
-            # Prefer pinned containers, fallback to unpinned, then combine if needed
-            if pinned_containers:
-                # If multiple pinned containers, take the largest one
-                return max(pinned_containers, key=len)
-            elif unpinned_containers:
-                return max(unpinned_containers, key=len)
-            else:
-                # Last resort: combine all containers with children
-                combined = []
-                for container_id in space_container_ids:
-                    if container_id in ['pinned', 'unpinned']:
-                        continue
-                    for i in range(0, len(items), 2):
-                        if i + 1 < len(items) and items[i] == container_id:
-                            container_data = items[i + 1]
-                            children_ids = container_data.get('childrenIds', [])
-                            combined.extend(children_ids)
-                            break
-                return combined
+            # Fallback: combine all non-marker containers
+            combined = []
+            for cid in space_container_ids:
+                if cid in ('pinned', 'unpinned'):
+                    continue
+                for i in range(0, len(items), 2):
+                    if i + 1 < len(items) and items[i] == cid:
+                        combined.extend(items[i + 1].get('childrenIds', []))
+                        break
+            return combined
+
+        return []
+
+    def _get_unpinned_tab_order(self, space_id: str, items_lookup: Dict, data: Dict) -> List[str]:
+        """Get the display order of unpinned (open) tabs in a space.
+        
+        Finds the container UUID immediately following the 'unpinned' marker.
+        """
+        space_container_ids = self._get_space_container_ids(space_id, data)
+        if not space_container_ids:
+            return []
+
+        containers = data.get('sidebar', {}).get('containers', [])
+        if len(containers) > 1 and 'items' in containers[1]:
+            items = containers[1]['items']
+
+            # Find the container UUID that comes immediately after the 'unpinned' marker
+            unpinned_container_uuid = None
+            for idx, cid in enumerate(space_container_ids):
+                if cid == 'unpinned' and idx + 1 < len(space_container_ids):
+                    next_cid = space_container_ids[idx + 1]
+                    if next_cid not in ('pinned', 'unpinned'):
+                        unpinned_container_uuid = next_cid
+                    break
+
+            if unpinned_container_uuid:
+                for i in range(0, len(items), 2):
+                    if i + 1 < len(items) and items[i] == unpinned_container_uuid:
+                        children_ids = items[i + 1].get('childrenIds', [])
+                        if children_ids:
+                            return children_ids
+                        break
 
         return []
 
@@ -892,8 +943,10 @@ class ArcPinnedTabExtractor:
                     'icon': space.icon,
                     'color': space.color,
                     'total_pinned_tabs': len(space.pinned_tabs),
+                    'total_open_tabs': len(space.open_tabs),
                     'total_folders': len(space.folders),
                     'pinned_tabs': [tab.to_dict() for tab in space.pinned_tabs],
+                    'open_tabs': [tab.to_dict() for tab in space.open_tabs],
                     'folders': [asdict(folder) for folder in space.folders]
                 }
                 export_data['spaces'].append(space_data)
@@ -910,17 +963,20 @@ class ArcPinnedTabExtractor:
 
     def get_extraction_summary(self, arc_spaces: List[ArcSpace]) -> Dict:
         """Generate summary statistics for extraction."""
-        total_tabs = sum(len(space.pinned_tabs) for space in arc_spaces)
+        total_pinned = sum(len(space.pinned_tabs) for space in arc_spaces)
+        total_open = sum(len(space.open_tabs) for space in arc_spaces)
         total_folders = sum(len(space.folders) for space in arc_spaces)
 
         return {
             'total_spaces': len(arc_spaces),
-            'total_pinned_tabs': total_tabs,
+            'total_pinned_tabs': total_pinned,
+            'total_open_tabs': total_open,
             'total_folders': total_folders,
             'spaces_summary': [
                 {
                     'name': space.space_name,
                     'pinned_tabs': len(space.pinned_tabs),
+                    'open_tabs': len(space.open_tabs),
                     'folders': len(space.folders)
                 }
                 for space in arc_spaces

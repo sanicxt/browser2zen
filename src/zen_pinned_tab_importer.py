@@ -134,7 +134,7 @@ class ZenPinnedTabImporter:
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT uuid FROM zen_pins
-                    WHERE title = ? AND container_id = ? AND is_group = 1 AND folder_parent_uuid IS ?
+                    WHERE title = ? AND container_id = ? AND is_group = 1 AND parent_uuid IS ?
                 """, (title, container_id, parent_uuid))
 
                 existing = cursor.fetchone()
@@ -154,9 +154,9 @@ class ZenPinnedTabImporter:
                 cursor.execute("""
                     INSERT INTO zen_pins (
                         uuid, title, url, container_id, workspace_uuid, position,
-                        is_essential, is_group, folder_parent_uuid, created_at, updated_at,
-                        edited_title, is_folder_collapsed, folder_icon
-                    ) VALUES (?, ?, NULL, ?, ?, ?, 0, 1, ?, ?, ?, 0, 0, NULL)
+                        is_essential, is_group, parent_uuid, created_at, updated_at,
+                        edited_title
+                    ) VALUES (?, ?, NULL, ?, ?, ?, 0, 1, ?, ?, ?, 0)
                 """, (folder_uuid, title, container_id, workspace_uuid, position,
                       parent_uuid, timestamp, timestamp))
 
@@ -246,9 +246,9 @@ class ZenPinnedTabImporter:
                 cursor.execute("""
                     INSERT INTO zen_pins (
                         uuid, title, url, container_id, workspace_uuid, position,
-                        is_essential, is_group, folder_parent_uuid, created_at, updated_at,
-                        edited_title, is_folder_collapsed, folder_icon, arc_tab_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, 0, NULL, ?)
+                        is_essential, is_group, parent_uuid, created_at, updated_at,
+                        edited_title, arc_tab_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                 """, (tab.uuid, tab.title, tab.url, tab.container_id, tab.workspace_uuid,
                       tab.position, int(tab.is_essential), tab.parent_uuid,
                       timestamp, timestamp, int(tab.edited_title), tab.arc_tab_id))
