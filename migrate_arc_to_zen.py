@@ -28,6 +28,15 @@ from zen_pinned_tab_importer import ZenPinnedTabImporter
 from zen_workspace_importer import ZenWorkspaceImporter
 from zen_sessions_importer import ZenSessionsImporter
 
+# Optional: Import sessionstore manager for open tabs (requires lz4)
+try:
+    from zen_sessionstore_manager import ZenSessionstoreManager
+    OPEN_TABS_AVAILABLE = True
+except ImportError:
+    OPEN_TABS_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning("lz4 library not found - open tabs import will be skipped. Install with: pip install lz4")
+
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
@@ -107,14 +116,14 @@ class Arc2ZenMigrator:
 
         return running_browsers, len(running_browsers) > 0
 
-    def run_migration(self, dry_run: bool = False, zen_profile_name: Optional[str] = None, arc_space_name: Optional[str] = None) -> bool:
+    def run_migration(self, dry_run: bool = False, zen_profile_name: Optional[str] = None, arc_space_name: Optional[str] = None, import_open_tabs: bool = False) -> bool:
         """Run the complete Arc to Zen migration process."""
 
         print("🔄 Arc to Zen Browser Migration v1.2 (2025-09-29)")
         print("=" * 50)
 
         logger.info("Starting Arc to Zen migration")
-        logger.info(f"Options: dry_run={dry_run}, zen_profile={zen_profile_name}, arc_space={arc_space_name}")
+        logger.info(f"Options: dry_run={dry_run}, zen_profile={zen_profile_name}, arc_space={arc_space_name}, import_open_tabs={import_open_tabs}")
 
         # Clean up any previous export file to prevent caching issues
         if self.temp_export_file.exists():
@@ -167,11 +176,12 @@ class Arc2ZenMigrator:
             arc_spaces = all_arc_spaces
 
         total_extracted = sum(len(space.pinned_tabs) for space in arc_spaces)
-        print(f"✅ Found {len(arc_spaces)} Arc space{'s' if len(arc_spaces) > 1 else ''} with {total_extracted} pinned tabs")
+        total_open_tabs = sum(len(space.open_tabs) for space in arc_spaces)
+        print(f"✅ Found {len(arc_spaces)} Arc space{'s' if len(arc_spaces) > 1 else ''} with {total_extracted} pinned tabs + {total_open_tabs} open tabs")
         for space in arc_spaces:
-            print(f"  • {space.space_name}: {len(space.pinned_tabs)} tabs, {len(space.folders)} folders")
+            print(f"  • {space.space_name}: {len(space.pinned_tabs)} pinned, {len(space.open_tabs)} open, {len(space.folders)} folders")
 
-        print(f"\n📊 Total pinned tabs to migrate: {total_extracted}")
+        print(f"\n📊 Total to migrate: {total_extracted} pinned tabs + {total_open_tabs} open tabs")
 
         # Step 2: Export to temporary file
         print("\n💾 Step 2: Preparing export data...")
@@ -282,7 +292,35 @@ class Arc2ZenMigrator:
         print("\n📚 Step 4d: Importing as bookmarks...")
         bookmark_success = zen_importer.import_arc_bookmarks(arc_export_data, dry_run=dry_run)
 
-        success = space_success and pinned_success and workspace_success and bookmark_success
+        # Step 4e: Import open tabs to sessionstore
+        print("\n🔄 Step 4f: Importing open tabs...")
+        session_success = True
+        total_open_tabs = sum(len(space.get('open_tabs', [])) for space in arc_export_data.get('spaces', []))
+
+        if not import_open_tabs:
+            print(f"ℹ️  Open tabs skipped (use --open-tabs to include {total_open_tabs} open tabs)")
+        elif not OPEN_TABS_AVAILABLE:
+            print("⚠️  Open tabs import unavailable (lz4 not installed). Run: pip install lz4")
+        elif total_open_tabs > 0:
+            try:
+                session_manager = ZenSessionstoreManager(selected_zen_profile)
+                if session_manager.create_workspaces_with_tabs(arc_export_data, container_mappings, dry_run=dry_run):
+                    if dry_run:
+                        print(f"🧪 Would import {total_open_tabs} open tabs")
+                    else:
+                        print(f"✅ Imported {total_open_tabs} open tabs")
+                        print("   ⚠️  Restart Zen browser to see open tabs")
+                else:
+                    print("⚠️  Failed to import open tabs")
+                    session_success = False
+            except Exception as e:
+                print(f"⚠️  Open tabs import error: {e}")
+                logger.error(f"Open tabs import failed: {e}")
+                session_success = False
+        else:
+            print("ℹ️  No open tabs to import")
+
+        success = space_success and pinned_success and workspace_success and bookmark_success and session_success
 
         # Cleanup
         if self.temp_export_file.exists():
@@ -295,9 +333,10 @@ class Arc2ZenMigrator:
             else:
                 print("\n🎉 Migration completed successfully!")
                 print(f"📌 Your Arc pinned tabs are now in Zen as actual pinned tabs")
+                print(f"🔄 Open tabs imported to Zen sessionstore ({total_open_tabs} tabs)")
                 print(f"🏗️ Created {len(arc_spaces)} Zen workspaces for your Arc spaces")
                 print(f"📁 Bookmarks also imported as backup under 'Unfiled Bookmarks'")
-                print(f"📊 Migrated {total_extracted} pinned tabs from {len(arc_spaces)} Arc spaces")
+                print(f" Migrated {total_extracted} pinned tabs + {total_open_tabs} open tabs")
 
             logger.info(f"Migration completed successfully. Bookmarks migrated: {total_extracted}")
             return True
@@ -323,7 +362,6 @@ class Arc2ZenMigrator:
         print("• Restart Zen browser to see your imported data")
         print("• A backup was created before import (restore if needed)")
 
-
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
@@ -331,7 +369,8 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python3 migrate_arc_to_zen.py                    # Full migration
+  python3 migrate_arc_to_zen.py                    # Full migration (pinned tabs + history)
+  python3 migrate_arc_to_zen.py --open-tabs        # Also migrate open tabs to sessionstore
   python3 migrate_arc_to_zen.py --dry-run          # Test run only
   python3 migrate_arc_to_zen.py --zen-profile Default  # Specific Zen profile
   python3 migrate_arc_to_zen.py --arc-space Personal  # Migrate only Personal space
@@ -359,6 +398,13 @@ Examples:
     )
 
     parser.add_argument(
+        '--open-tabs',
+        action='store_true',
+        default=False,
+        help='Also migrate open (non-pinned) tabs to Zen sessionstore (requires lz4: pip install lz4)'
+    )
+
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help='Enable verbose logging output'
@@ -376,7 +422,8 @@ Examples:
         success = migrator.run_migration(
             dry_run=args.dry_run,
             zen_profile_name=args.zen_profile,
-            arc_space_name=args.arc_space
+            arc_space_name=args.arc_space,
+            import_open_tabs=args.open_tabs
         )
 
         if success and not args.dry_run:

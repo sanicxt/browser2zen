@@ -1,6 +1,6 @@
 # Arc to Zen Browser Migration Tool
 
-A complete Python-based migration tool that converts Arc browser spaces and pinned tabs into Zen browser workspaces with proper pinned tab assignment.
+A complete Python-based migration tool that converts Arc browser spaces, pinned tabs, and open tabs into Zen browser workspaces with proper tab assignment.
 
 ## 🚀 Quick Start
 
@@ -10,6 +10,7 @@ A complete Python-based migration tool that converts Arc browser spaces and pinn
 - **Arc Browser** (with spaces and pinned tabs you want to migrate)
 - **Zen Browser** (installed and run at least once)
 - **macOS** or **Windows** (current implementation)
+- **lz4** Python package (for session tab injection): `pip install lz4`
 
 ### Installation
 
@@ -19,7 +20,7 @@ git clone https://github.com/rafcabezas/arc2zen.git
 cd arc2zen
 ```
 
-2. Install the required dependency:
+2. Install the optional dependency for session tab injection:
 ```bash
 pip install lz4
 ```
@@ -35,19 +36,39 @@ python3 migrate_arc_to_zen.py --dry-run
 # If everything looks good, run the actual migration
 python3 migrate_arc_to_zen.py
 
-# Migrate only a specific Arc space (useful for testing or selective migration)
-python3 migrate_arc_to_zen.py --arc-space "Personal" --dry-run
+# Then inject all tabs into the session file (makes tabs actually appear)
+python3 inject_session_tabs.py
 ```
 
-### Advanced Usage
+### Important: Session Tab Injection
+
+After running the main migration, tabs may only appear as bookmarks or metadata.
+To make them show up as **real browser tabs** in Zen's sidebar, run:
 
 ```bash
 # Migrate with custom settings
 python3 migrate_arc_to_zen.py --zen-profile "Default" --verbose
+```
 
+This writes directly to `zen-sessions.jsonlz4`, which is the file Zen actually
+reads to render tabs. The script is idempotent — re-running it replaces
+previously-injected tabs with a fresh extraction.
+
+### Advanced Usage
+
+```bash
 # Migrate only a specific Arc space
 python3 migrate_arc_to_zen.py --arc-space "Personal"
 python3 migrate_arc_to_zen.py --arc-space "Work" --dry-run
+
+# Specify Zen profile
+python3 migrate_arc_to_zen.py --zen-profile "Default"
+
+# Also migrate open tabs via sessionstore (legacy approach)
+python3 migrate_arc_to_zen.py --open-tabs
+
+# Verbose logging
+python3 migrate_arc_to_zen.py --verbose
 
 # See all available options
 python3 migrate_arc_to_zen.py --help
@@ -60,6 +81,7 @@ python3 migrate_arc_to_zen.py --help
 - **Space Colors** → **Workspace Themes** (Arc's subtle color tints accurately reproduced)
 - **Pinned Tabs** → **Zen Pinned Tabs** (with folder structure preserved)
 - **Essential Tabs** → **Essential Pinned Tabs** (Arc's top toolbar tabs with large icons)
+- **Open Tabs** → **Zen Open Tabs** (unpinned tabs restored as real browser tabs)
 - **Folder Hierarchy** → **Zen Folder Structure** (nested folders maintained)
 - **Display Order** → **Zen Sidebar Order** (Arc visual ordering preserved)
 - **Backup Bookmarks** → **Firefox Bookmarks** (additional backup as standard bookmarks)
@@ -67,9 +89,10 @@ python3 migrate_arc_to_zen.py --help
 ## 🔧 How It Works
 
 ### Step 1: Analyze Your Arc Data
-The tool reads your Arc browser's `StorableSidebar.json` to extract:
+The tool reads Arc's `StorableSidebar.json` to extract:
 - Space names, structure, and icons (Unicode emojis when available)
 - Pinned tabs with URLs and metadata
+- Open (unpinned) tabs per space
 - Folder hierarchy within each space
 - Visual ordering using container childrenIds
 
@@ -244,12 +267,15 @@ If anything goes wrong:
 ## 🔬 Technical Details
 
 ### Arc Browser Structure
-- **Location**: `~/Library/Application Support/Arc/User Data/Default/`
+- **Location**: `~/Library/Application Support/Arc/` (macOS)
 - **Format**: Chromium-based with Arc-specific extensions
-- **Key File**: `StorableSidebar.json` contains spaces and pinned tabs
+- **Key File**: `StorableSidebar.json` contains spaces, pinned tabs, and folder hierarchy
+- **Container ordering**: Each space has `containerIDs: ['pinned', uuid, 'unpinned', uuid]`
+  where the UUID immediately following each marker stores that category's `childrenIds`
+  in exact visual order. The marker order can vary (pinned-first or unpinned-first).
 
 ### Zen Browser Structure
-- **Location**: `~/Library/Application Support/zen/Profiles/[profile]/`
+- **Location**: `~/Library/Application Support/zen/Profiles/[profile]/` (macOS)
 - **Format**: Firefox-based
 - **Key Files**:
   - `zen-sessions.jsonlz4` (Zen 1.18+: spaces, pinned tabs, folders)

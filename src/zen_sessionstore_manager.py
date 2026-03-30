@@ -189,12 +189,12 @@ class ZenSessionstoreManager:
                 container_id = container_mappings.get(space_name, 1)
                 workspace_uuid = str(uuid.uuid4())
 
-                # Create tabs for this workspace
+                # Create tabs for this workspace from open (non-pinned) tabs
                 tabs = []
-                for pinned_tab in space.get('pinned_tabs', [])[:10]:  # Limit for testing
+                for open_tab in space.get('open_tabs', []):
                     tab = ZenTab(
-                        url=pinned_tab['url'],
-                        title=pinned_tab['title'],
+                        url=open_tab['url'],
+                        title=open_tab.get('title', open_tab['url']),
                         userContextId=container_id,
                         workspace_uuid=workspace_uuid
                     )

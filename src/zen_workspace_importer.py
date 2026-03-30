@@ -8,10 +8,18 @@ Creates actual Zen workspaces for each Arc space and properly assigns pinned tab
 import sqlite3
 import uuid
 import logging
+import struct
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 import json
+
+try:
+    import lz4.block
+    HAS_LZ4 = True
+except ImportError:
+    HAS_LZ4 = False
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +30,7 @@ class ZenWorkspaceImporter:
         self.zen_profile = zen_profile_path
         self.places_db = zen_profile_path / "places.sqlite"
         self.prefs_file = zen_profile_path / "prefs.js"
+        self.sessions_file = zen_profile_path / "zen-sessions.jsonlz4"
 
     def get_existing_workspaces(self) -> Dict[str, Dict]:
         """Get existing workspaces from zen_workspaces table."""
@@ -354,6 +363,9 @@ class ZenWorkspaceImporter:
                 first_workspace_uuid = list(final_workspace_mappings.values())[0]
                 self.set_active_workspace(first_workspace_uuid)
 
+            # Sync workspaces to zen-sessions.jsonlz4 (required for Zen UI)
+            self._sync_workspaces_to_session()
+
             logger.info(f"✅ Successfully created {len(final_workspace_mappings)} workspaces")
             return True
 
@@ -395,4 +407,102 @@ class ZenWorkspaceImporter:
 
         except Exception as e:
             logger.error(f"Failed to clear temporary workspaces: {e}")
+            return False
+
+    # ── mozlz4 helpers ──────────────────────────────────────────────
+
+    @staticmethod
+    def _read_mozlz4(path: Path) -> dict:
+        """Read a Mozilla LZ4 compressed JSON file."""
+        with open(path, "rb") as f:
+            data = f.read()
+        if data[:8] != b"mozLz40\x00":
+            raise ValueError(f"Not a mozLz4 file: {path}")
+        size = struct.unpack("<I", data[8:12])[0]
+        decompressed = lz4.block.decompress(data[12:], uncompressed_size=size)
+        return json.loads(decompressed)
+
+    @staticmethod
+    def _write_mozlz4(path: Path, obj: dict) -> None:
+        """Write a dict as a Mozilla LZ4 compressed JSON file."""
+        json_bytes = json.dumps(obj).encode("utf-8")
+        compressed = lz4.block.compress(json_bytes, store_size=False)
+        with open(path, "wb") as f:
+            f.write(b"mozLz40\x00")
+            f.write(struct.pack("<I", len(json_bytes)))
+            f.write(compressed)
+
+    # ── Session-file sync ───────────────────────────────────────────
+
+    def _sync_workspaces_to_session(self) -> bool:
+        """Sync workspaces from the DB into zen-sessions.jsonlz4.
+
+        Zen loads workspace definitions from this session file on startup,
+        NOT from the zen_workspaces table alone.  Without this step the
+        workspaces would exist in the database but never appear in the UI.
+        """
+        if not HAS_LZ4:
+            logger.warning("lz4 not installed – cannot update zen-sessions.jsonlz4. "
+                           "Workspaces may not appear in the Zen UI.")
+            return False
+
+        if not self.sessions_file.exists():
+            logger.warning(f"Session file not found: {self.sessions_file}")
+            return False
+
+        try:
+            # Backup
+            backup = self.sessions_file.with_suffix(".jsonlz4.bak")
+            shutil.copy2(self.sessions_file, backup)
+
+            sessions = self._read_mozlz4(self.sessions_file)
+            existing_uuids = {s["uuid"] for s in sessions.get("spaces", [])}
+
+            # Read all workspaces from DB
+            with sqlite3.connect(self.places_db) as conn:
+                rows = conn.execute(
+                    """SELECT uuid, name, icon, container_id, position,
+                              theme_type, theme_colors, theme_opacity,
+                              theme_rotation, theme_texture
+                       FROM zen_workspaces ORDER BY position"""
+                ).fetchall()
+
+            added = 0
+            for (ws_uuid, name, icon, container_id, position,
+                 theme_type, theme_colors, theme_opacity,
+                 theme_rotation, theme_texture) in rows:
+
+                if ws_uuid in existing_uuids:
+                    continue
+
+                try:
+                    gradient_colors = json.loads(theme_colors) if theme_colors else []
+                except Exception:
+                    gradient_colors = []
+
+                space_entry = {
+                    "uuid": ws_uuid,
+                    "name": name,
+                    "icon": icon,
+                    "containerTabId": container_id if container_id else 0,
+                    "position": position,
+                    "theme": {
+                        "type": theme_type or "gradient",
+                        "gradientColors": gradient_colors,
+                        "opacity": theme_opacity if theme_opacity is not None else 0.5,
+                        "rotation": theme_rotation,
+                        "texture": theme_texture,
+                    },
+                    "hasCollapsedPinnedTabs": False,
+                }
+                sessions.setdefault("spaces", []).append(space_entry)
+                added += 1
+
+            self._write_mozlz4(self.sessions_file, sessions)
+            logger.info(f"📦 Synced {added} new workspace(s) to zen-sessions.jsonlz4 "
+                        f"(total: {len(sessions.get('spaces', []))})")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to sync workspaces to session file: {e}")
             return False

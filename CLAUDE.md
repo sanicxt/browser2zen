@@ -38,7 +38,8 @@ python3 src/zen_workspace_mapper.py
 1. **Arc Data Extraction** - Extract from `~/Library/Application Support/Arc/StorableSidebar.json`
 2. **Zen Profile Discovery** - Locate Zen profiles in `~/Library/Application Support/zen/Profiles/`
 3. **Container/Workspace Creation** - Create Zen containers and workspaces for each Arc space
-4. **Data Import** - Import as both pinned tabs and backup bookmarks
+4. **Database Import** - Import metadata to zen_pins and bookmarks
+5. **Session Injection** - Inject real tabs into `zen-sessions.jsonlz4` (key step)
 
 ### Key Components
 
@@ -61,6 +62,7 @@ python3 src/zen_workspace_mapper.py
 - `zen_workspace_importer.py` - Creates workspaces in `zen_workspaces` table
 - `zen_space_importer.py` - Manages containers in `containers.json`
 - `zen_bookmark_importer.py` - Backup import as Firefox bookmarks
+- `zen_sessionstore_manager.py` - Manages `zen-sessions.jsonlz4` for open tabs
 
 ### Data Flow
 
@@ -68,9 +70,10 @@ python3 src/zen_workspace_mapper.py
 
 ```
 StorableSidebar.json
-├── firebaseSyncState.syncData.spaceModels (space metadata)
-├── sidebar.containers[1].items (pinned content)
-└── folder hierarchy via parentID relationships
+├── firebaseSyncState.syncData.spaceModels (space metadata + icons)
+├── sidebar.containers[1].items (tabs, folders, containers)
+├── sidebar.containers[1].spaces (space → containerIDs mapping)
+└── containerIDs: ['pinned', uuid, 'unpinned', uuid] per space
 ```
 
 **Zen Target:**
@@ -78,12 +81,17 @@ StorableSidebar.json
 ```
 Zen Profile/
 ├── places.sqlite (main database)
-│   ├── zen_pins (pinned tabs with workspace UUIDs)
-│   ├── zen_workspaces (workspace definitions)
-│   └── moz_bookmarks (Firefox-style bookmarks)
+│   ├── zen_pins (pinned tab metadata — NOT used for rendering)
+│   ├── zen_workspaces (workspace definitions with icons/colors)
+│   └── moz_bookmarks (Firefox-style bookmarks backup)
+├── zen-sessions.jsonlz4 (SOURCE OF TRUTH for rendered tabs)
 ├── containers.json (container/space definitions)
 └── prefs.js (active workspace preferences)
 ```
+
+> **Critical insight**: Zen renders sidebar tabs from `zen-sessions.jsonlz4`,
+> NOT from the `zen_pins` database table. The DB stores metadata only.
+> `inject_session_tabs.py` handles this key step.
 
 ## Important Implementation Details
 
@@ -109,27 +117,20 @@ data.sidebar.containers[1].items['BDF69180-4E9B-4B4A-B1B4-D6950292683E'].childre
 ]
 ```
 
-**Key Insight:** The string "pinned" is just a logical identifier - the actual display order is stored in a **container UUID** with `childrenIds`.
+**Key Insight:** The strings "pinned" and "unpinned" are markers in the `containerIDs` array. The UUID immediately *following* each marker is the actual container storing that category's `childrenIds` (display order). The marker order can vary — some spaces have `['pinned', uuid, 'unpinned', uuid]`, others have `['unpinned', uuid, 'pinned', uuid]`.
 
 **Implementation (Working):**
 
 ```python
-def _get_space_display_order(self, space_id: str, items_lookup: Dict, data: Dict) -> List[str]:
-    """Get display order using container childrenIds (Arc's true visual order)."""
+def _get_space_display_order(self, space_id, items_lookup, data):
+    """Get pinned tab display order using the container after 'pinned' marker."""
     space_container_ids = self._get_space_container_ids(space_id, data)
-
-    # Look for containers with childrenIds (skip 'pinned'/'unpinned' strings)
-    for container_id in space_container_ids:
-        if container_id in ['pinned', 'unpinned']:
-            continue
-
-        # Find this UUID in items and check for childrenIds
-        container_data = items_lookup.get(container_id, {})
-        children_ids = container_data.get('childrenIds', [])
-        if children_ids:
-            return children_ids  # This is the display order!
-
-    return []
+    # Find the UUID immediately after the 'pinned' marker
+    for idx, cid in enumerate(space_container_ids):
+        if cid == 'pinned' and idx + 1 < len(space_container_ids):
+            pinned_uuid = space_container_ids[idx + 1]
+            # Look up its childrenIds — that's the display order
+            ...
 ```
 
 **Results Achieved:**
@@ -144,6 +145,7 @@ def _get_space_display_order(self, space_id: str, items_lookup: Dict, data: Dict
 2. **Locate display container** that has `childrenIds` array
 3. **Extract in order** using `childrenIds` sequence (not Arc index sorting)
 4. **Process recursively** for folder contents using their own `childrenIds`
+5. **Repeat for 'unpinned'** marker to get open tabs
 
 ### Folder Hierarchy
 
