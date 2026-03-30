@@ -49,6 +49,12 @@ sessionstore_backup_*.jsonlz4
 places.sqlite.backup.*
 zen_database_backup_*.sqlite
 
+# User-specific local scripts (hardcoded paths, not for sharing)
+local/
+
+# Virtual environments
+.venv/
+
 # Local configuration files
 .claude/settings.local.json
 

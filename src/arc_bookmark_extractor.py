@@ -8,6 +8,7 @@ Handles the Chromium History database format used by Arc.
 
 import sqlite3
 import json
+import os
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass, asdict
@@ -53,15 +54,36 @@ class ProfileBookmarks:
 
 
 class ArcBookmarkExtractor:
-    """Extracts bookmarks and history from Arc profile databases."""
+    # extracts bookmarks & history from arc profile databases
 
     def __init__(self):
-	if os.name == "nt":
-		self.home_dir = os.path.expanduser(r"~\")
-		self.arc_data_dir = self.home_dir / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4/LocalCache/Local/Arc/User Data"
-	else:
-        	self.home_dir = Path.home()
-        	self.arc_data_dir = self.home_dir / "Library/Application Support/Arc/User Data"
+        if os.name == "nt":
+            self.home_dir = Path(os.path.expanduser("~"))
+            self.arc_data_dir = self.home_dir / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4/LocalCache/Local/Arc/User Data"
+        else:
+            self.home_dir = Path.home()
+            self.arc_data_dir = self.home_dir / "Library/Application Support/Arc/User Data"
+
+    def find_arc_profiles(self) -> List[Path]:
+        profiles = []
+        
+        if not self.arc_data_dir.exists():
+            logger.warning(f"Arc data directory not found: {self.arc_data_dir}")
+            return profiles
+        
+        profile_dirs = list(self.arc_data_dir.glob("Profile *"))
+        
+        default_dir = self.arc_data_dir / "Default"
+        if default_dir.exists():
+            profile_dirs.append(default_dir)
+        
+        for profile_dir in profile_dirs:
+            history_db = profile_dir / "History"
+            if history_db.exists():
+                profiles.append(profile_dir)
+        
+        logger.info(f"Found {len(profiles)} Arc profiles with history data")
+        return profiles
 
     def extract_profile_bookmarks(self, profile_path: Path, profile_id: str = "") -> Optional[ProfileBookmarks]:
         """Extract bookmarks from a single Arc profile."""

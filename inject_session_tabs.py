@@ -1,0 +1,371 @@
+#!/usr/bin/env python3
+# Arc → Zen Session Tab Injector
+# Injects Arc tabs into zen-sessions.jsonlz4 as real browser tabs.
+# Zen renders sidebar tabs from this file, NOT from the zen_pins DB.
+# Re-running replaces previously-injected tabs (idempotent).
+# Requires: pip install lz4
+
+import argparse
+import json
+import struct
+import lz4.block
+import sqlite3
+import glob
+import os
+import sys
+import uuid
+import shutil
+from datetime import datetime
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+from arc_pinned_tab_extractor import ArcPinnedTabExtractor
+
+
+# ---------------------------------------------------------------------------
+# Mozilla LZ4 file I/O (zen-sessions.jsonlz4 format)
+# ---------------------------------------------------------------------------
+
+def read_mozlz4(path):
+    # mozLz4 format: 8-byte magic + 4-byte LE size + lz4 block
+    with open(path, 'rb') as f:
+        magic = f.read(8)
+        if magic != b'mozLz40\0':
+            raise ValueError(f"Not a Mozilla LZ4 file (magic: {magic!r})")
+        size = struct.unpack('<I', f.read(4))[0]
+        return json.loads(lz4.block.decompress(f.read(), uncompressed_size=size))
+
+
+def write_mozlz4(path, data):
+    json_bytes = json.dumps(data, separators=(',', ':')).encode('utf-8')
+    compressed = lz4.block.compress(json_bytes, store_size=False)
+    with open(path, 'wb') as f:
+        f.write(b'mozLz40\0')
+        f.write(struct.pack('<I', len(json_bytes)))
+        f.write(compressed)
+
+
+# ---------------------------------------------------------------------------
+# Zen profile discovery
+# ---------------------------------------------------------------------------
+
+def find_zen_profile():
+    # Auto-detect Zen profile dir (macOS + Windows)
+    if os.name == 'nt':
+        base = os.path.expandvars(r'%APPDATA%\zen\Profiles')
+    else:
+        base = os.path.expanduser('~/Library/Application Support/zen/Profiles')
+
+    pattern = os.path.join(base, '*', 'places.sqlite')
+    matches = glob.glob(pattern)
+    if not matches:
+        raise FileNotFoundError(
+            f"No Zen profile found. Looked in: {base}\n"
+            "Make sure Zen browser has been run at least once."
+        )
+    return os.path.dirname(matches[0])
+
+
+def get_workspace_map(profile_path):
+    # Read workspace name → {uuid, container_id} from zen_workspaces table
+    db = os.path.join(profile_path, 'places.sqlite')
+    conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+    result = {}
+    for name, ws_uuid, cid in conn.execute(
+        'SELECT name, uuid, container_id FROM zen_workspaces ORDER BY position'
+    ).fetchall():
+        result[name] = {'uuid': ws_uuid, 'container_id': cid or 0}
+    conn.close()
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Session tab construction
+# ---------------------------------------------------------------------------
+
+def make_session_tab(url, title, workspace_uuid, container_id,
+                     pinned=False, essential=False, group_id=None):
+    # Build a single tab entry for zen-sessions.jsonlz4
+    # zenWorkspace = which sidebar, zenEssential = top toolbar, groupId = folder
+    now_ms = int(datetime.now().timestamp() * 1000)
+    doc_id = int.from_bytes(os.urandom(4), 'big')
+    entry_id = int.from_bytes(os.urandom(4), 'big')
+
+    tab = {
+        "entries": [{
+            "url": url,
+            "title": title or url,
+            "cacheKey": 0,
+            "ID": entry_id,
+            "docshellUUID": "{" + str(uuid.uuid4()) + "}",
+            "originalURI": url,
+            "resultPrincipalURI": None,
+            "hasUserInteraction": False,
+            "triggeringPrincipal_base64": '{"3":{}}',
+            "docIdentifier": doc_id,
+            "transient": False,
+        }],
+        "lastAccessed": now_ms,
+        "hidden": False,
+        "zenWorkspace": workspace_uuid,
+        "zenSyncId": f"{now_ms}-{doc_id}",
+        "zenEssential": essential,
+        "pinned": pinned,
+        "zenDefaultUserContextId": "true",
+        "zenPinnedIcon": None,
+        "zenIsEmpty": False,
+        "zenHasStaticIcon": False,
+        "zenGlanceId": None,
+        "zenIsGlance": False,
+        "zenLiveFolderItemId": None,
+        "searchMode": None,
+        "userContextId": container_id,
+        "attributes": {},
+        "index": 1,
+        "scroll": {"scroll": "0,0"},
+        "storage": {},
+        "userTypedValue": "",
+        "userTypedClear": 0,
+        "image": None,
+    }
+    if group_id:
+        tab["groupId"] = group_id
+    return tab
+
+
+def make_session_folder(folder_id, name, workspace_uuid, pinned=True, parent_id=None):
+    # Build a folder entry for the session 'folders' array
+    # Tabs inside this folder reference it via groupId = folder_id
+    return {
+        "pinned": pinned,
+        "splitViewGroup": False,
+        "id": folder_id,
+        "name": name,
+        "collapsed": False,
+        "saveOnWindowClose": True,
+        "parentId": parent_id,
+        "prevSiblingInfo": None,
+        "emptyTabIds": [],
+        "userIcon": "",
+        "workspaceId": workspace_uuid,
+    }
+
+
+def make_session_group(folder_id, name, pinned=True):
+    # Build matching 'groups' entry (Zen stores both folders + groups)
+    return {
+        "pinned": pinned,
+        "splitView": False,
+        "id": folder_id,
+        "name": name,
+        "color": "zen-workspace-color",
+        "collapsed": False,
+        "saveOnWindowClose": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main injection logic
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Inject Arc tabs into Zen's session file as real browser tabs",
+    )
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Preview what would be injected without writing')
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("Arc → Zen Session Tab Injector")
+    print("=" * 60)
+
+    # 1. Find Zen profile
+    profile = find_zen_profile()
+    print(f"Zen profile: {profile}")
+
+    # 2. Get workspace mappings from DB (created by migrate_arc_to_zen.py)
+    ws_map = get_workspace_map(profile)
+    if not ws_map:
+        print("ERROR: No workspaces found in Zen DB.")
+        print("Run migrate_arc_to_zen.py first to create workspaces.")
+        return False
+
+    print(f"\nWorkspaces ({len(ws_map)}):")
+    for name, info in ws_map.items():
+        print(f"  {name}: uuid={info['uuid'][:16]}... cid={info['container_id']}")
+
+    # 3. Extract all Arc tabs using the pinned tab extractor
+    print("\nExtracting Arc tabs...")
+    extractor = ArcPinnedTabExtractor()
+    arc_spaces = extractor.extract_pinned_tabs()
+
+    for s in arc_spaces:
+        ess = sum(1 for t in s.pinned_tabs if t.is_essential)
+        reg = sum(1 for t in s.pinned_tabs if not t.is_essential)
+        print(f"  {s.space_name}: {ess} essential + {reg} pinned + "
+              f"{len(s.open_tabs)} open + {len(s.folders)} folders")
+
+    total_pinned = sum(len(s.pinned_tabs) for s in arc_spaces)
+    total_open = sum(len(s.open_tabs) for s in arc_spaces)
+    print(f"  TOTAL: {total_pinned} pinned (incl essential) + "
+          f"{total_open} open = {total_pinned + total_open} tabs")
+
+    # 4. Read current session file
+    sess_file = os.path.join(profile, 'zen-sessions.jsonlz4')
+    if not os.path.exists(sess_file):
+        print("ERROR: zen-sessions.jsonlz4 not found!")
+        print("Open Zen browser once, close it, then re-run this script.")
+        return False
+
+    session = read_mozlz4(sess_file)
+    old_tabs = session.get('tabs', [])
+    print(f"\nCurrent session tabs: {len(old_tabs)}")
+
+    # 5. Separate native Zen tabs from previously-injected Arc tabs.
+    #    Arc-migrated workspaces have known UUIDs; tabs in those workspaces
+    #    are replaced. Tabs in non-Arc workspaces (e.g. default) are kept.
+    arc_ws_uuids = set()
+    for name, info in ws_map.items():
+        if any(s.space_name == name for s in arc_spaces):
+            arc_ws_uuids.add(info['uuid'])
+
+    kept_tabs = []
+    removed = 0
+    for tab in old_tabs:
+        if tab.get('zenWorkspace', '') in arc_ws_uuids:
+            removed += 1
+        else:
+            kept_tabs.append(tab)
+
+    # Also clean out old folders/groups that belong to Arc workspaces
+    old_folders = session.get('folders', [])
+    old_groups = session.get('groups', [])
+    kept_folders = [f for f in old_folders if f.get('workspaceId', '') not in arc_ws_uuids]
+    kept_folder_ids = {f['id'] for f in kept_folders}
+    kept_groups = [g for g in old_groups if g.get('id', '') in kept_folder_ids]
+
+    print(f"Keeping {len(kept_tabs)} native Zen tabs, "
+          f"replacing {removed} previously-injected tabs")
+
+    # 6. Build fresh tab entries + folder entries from Arc data
+    new_tabs = []
+    new_folders = []
+    new_groups = []
+    seen_urls = set()
+
+    for t in kept_tabs:
+        for e in t.get('entries', []):
+            seen_urls.add(e.get('url', ''))
+
+    stats = {}
+    total_folders_created = 0
+
+    for space in arc_spaces:
+        ws_info = ws_map.get(space.space_name)
+        if not ws_info:
+            print(f"  WARNING: No workspace for '{space.space_name}', skipping")
+            continue
+
+        ws_uuid = ws_info['uuid']
+        cid = ws_info['container_id']
+        s = {'essential': 0, 'pinned': 0, 'open': 0, 'skipped': 0, 'folders': 0}
+
+        # Build folder_name -> session folder_id mapping for this space
+        # Arc folders have a title; we generate a Zen-style folder ID for each
+        now_ms = int(datetime.now().timestamp() * 1000)
+        folder_id_map = {}  # Arc folder title -> session folder id
+        for i, folder in enumerate(space.folders):
+            folder_id = f"{now_ms}-{i}"
+            folder_id_map[folder.title] = folder_id
+
+            # Figure out parent folder id (for nested folders)
+            parent_folder_id = None
+            if folder.parent_id:
+                # Find parent folder by matching Arc folder_id to title
+                for other in space.folders:
+                    if other.folder_id == folder.parent_id:
+                        parent_folder_id = folder_id_map.get(other.title)
+                        break
+
+            new_folders.append(make_session_folder(
+                folder_id, folder.title, ws_uuid,
+                pinned=True, parent_id=parent_folder_id,
+            ))
+            new_groups.append(make_session_group(
+                folder_id, folder.title, pinned=True,
+            ))
+            s['folders'] += 1
+
+        total_folders_created += s['folders']
+
+        # Essential + pinned tabs (with folder assignment)
+        for tab in space.pinned_tabs:
+            if tab.url in seen_urls:
+                s['skipped'] += 1
+                continue
+            seen_urls.add(tab.url)
+
+            # If the tab has a folder_path, find its group_id
+            group_id = None
+            if tab.folder_path:
+                # Last element in folder_path is the immediate parent folder
+                group_id = folder_id_map.get(tab.folder_path[-1])
+
+            new_tabs.append(make_session_tab(
+                url=tab.url, title=tab.title,
+                workspace_uuid=ws_uuid, container_id=cid,
+                pinned=True, essential=tab.is_essential,
+                group_id=group_id,
+            ))
+            s['essential' if tab.is_essential else 'pinned'] += 1
+
+        # Open (unpinned) tabs
+        for tab in space.open_tabs:
+            if tab.url in seen_urls:
+                s['skipped'] += 1
+                continue
+            seen_urls.add(tab.url)
+            new_tabs.append(make_session_tab(
+                url=tab.url, title=tab.title,
+                workspace_uuid=ws_uuid, container_id=cid,
+                pinned=False, essential=False,
+            ))
+            s['open'] += 1
+
+        stats[space.space_name] = s
+
+    # 7. Summary
+    print(f"\nInjection summary:")
+    print(f"  Native Zen tabs kept: {len(kept_tabs)}")
+    print(f"  New Arc tabs to inject: {len(new_tabs)}")
+    print(f"  Folders to create: {total_folders_created}")
+    print(f"  Total session tabs: {len(kept_tabs) + len(new_tabs)}")
+
+    print(f"\nPer-workspace breakdown:")
+    for name, s in stats.items():
+        print(f"  {name}: {s['essential']} essential + {s['pinned']} pinned + "
+              f"{s['open']} open + {s['folders']} folders ({s['skipped']} deduped)")
+
+    if args.dry_run:
+        print(f"\nDRY RUN — no changes written.")
+        return True
+
+    # 8. Backup and write
+    backup = sess_file + f'.backup.{int(datetime.now().timestamp())}'
+    shutil.copy2(sess_file, backup)
+    print(f"\nBacked up session file")
+
+    session['tabs'] = kept_tabs + new_tabs
+    session['folders'] = kept_folders + new_folders
+    session['groups'] = kept_groups + new_groups
+    write_mozlz4(sess_file, session)
+    print(f"SUCCESS: Wrote {len(session['tabs'])} tabs + "
+          f"{len(new_folders)} folders to zen-sessions.jsonlz4")
+    print(f"Close & reopen Zen browser to see your tabs.")
+
+    return True
+
+
+if __name__ == '__main__':
+    success = main()
+    sys.exit(0 if success else 1)
