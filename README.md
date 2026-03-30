@@ -46,8 +46,8 @@ After running the main migration, tabs may only appear as bookmarks or metadata.
 To make them show up as **real browser tabs** in Zen's sidebar, run:
 
 ```bash
-python3 inject_session_tabs.py          # Inject all Arc tabs into Zen session
-python3 inject_session_tabs.py --dry-run  # Preview without changes
+# Migrate with custom settings
+python3 migrate_arc_to_zen.py --zen-profile "Default" --verbose
 ```
 
 This writes directly to `zen-sessions.jsonlz4`, which is the file Zen actually
@@ -94,26 +94,17 @@ The tool reads Arc's `StorableSidebar.json` to extract:
 - Pinned tabs with URLs and metadata
 - Open (unpinned) tabs per space
 - Folder hierarchy within each space
-- Visual ordering using container `childrenIds`
+- Visual ordering using container childrenIds
 
-### Step 2: Create Workspaces & Import Metadata
-`migrate_arc_to_zen.py` handles the database-level migration:
-- Creates Zen workspaces matching each Arc space (with icons and colors)
-- Creates container assignments for workspace isolation
-- Imports pinned tab metadata into `zen_pins` table
-- Creates backup bookmarks in `moz_bookmarks`
-### Step 3: Inject Session Tabs (Key Step)
-`inject_session_tabs.py` makes tabs actually appear in Zen's sidebar.
+### Step 2: Map Workspaces
+The tool helps you map Arc spaces to Zen workspaces:
+```bash
+python3 src/zen_workspace_mapper.py
+```
+This creates a mapping guide showing which Zen workspace UUID corresponds to each Arc space.
 
-> **Key insight**: Zen renders tabs from `zen-sessions.jsonlz4`, not from the
-> `zen_pins` database table. The DB is just metadata. Without session injection,
-> tabs show up as bookmarks but not as real sidebar tabs.
-
-The injector:
-1. Reads workspace UUIDs from Zen's database
-2. Extracts all Arc tabs (essential + pinned + open)
-3. Replaces previously-injected tabs (idempotent)
-4. Writes entries to `zen-sessions.jsonlz4` with proper workspace assignment
+### Step 3: Import Pinned Tabs & Workspaces
+For **Zen 1.18+**, spaces, pinned tabs, and folders are written directly to `zen-sessions.jsonlz4` — the modern storage format for Zen's sidebar. For older Zen versions, the tool falls back to the legacy `zen_pins` and `zen_workspaces` SQLite tables.
 
 ## 🛡️ Safety Features
 
@@ -126,23 +117,22 @@ The injector:
 
 ```
 arc2zen/
-├── migrate_arc_to_zen.py           # Main migration orchestrator (workspaces, DB, bookmarks)
-├── inject_session_tabs.py          # Session tab injector (makes tabs appear in Zen)
+├── migrate_arc_to_zen.py              # Main migration script
+├── requirements.txt                   # Python dependencies (lz4)
 ├── src/
-│   ├── arc_pinned_tab_extractor.py # Extract Arc pinned + open tabs with folder structure
-│   ├── arc_bookmark_extractor.py   # Extract Arc bookmarks from Chromium DB
-│   ├── arc_profile_discovery.py    # Discover Arc browser profiles
-│   ├── zen_pinned_tab_importer.py  # Import tabs into zen_pins table
-│   ├── zen_workspace_importer.py   # Create Zen workspaces with icons/colors
-│   ├── zen_space_importer.py       # Create Zen containers for workspaces
-│   ├── zen_bookmark_importer.py    # Backup import as Firefox-style bookmarks
-│   ├── zen_sessionstore_manager.py # Manage Zen session file (open tabs)
-│   ├── zen_workspace_mapper.py     # Map Arc spaces to Zen workspace UUIDs
-│   └── zen_schema_analyzer.py      # Analyze Zen database schema
-├── .gitignore
-├── README.md
-├── CLAUDE.md                       # AI assistant guidance for development
-└── LICENSE
+│   ├── arc_pinned_tab_extractor.py    # Extract Arc pinned tabs
+│   ├── arc_bookmark_extractor.py      # Extract Arc bookmarks
+│   ├── arc_profile_discovery.py       # Locate Arc profiles
+│   ├── zen_sessions_importer.py       # Import to zen-sessions.jsonlz4 (Zen 1.18+)
+│   ├── zen_sessionstore_manager.py    # Read/write mozlz4 sessionstore
+│   ├── zen_pinned_tab_importer.py     # Legacy: import tabs to zen_pins table
+│   ├── zen_workspace_importer.py      # Legacy: create zen_workspaces entries
+│   ├── zen_space_importer.py          # Create Zen containers for spaces
+│   ├── zen_bookmark_importer.py       # Backup import as Firefox bookmarks
+│   ├── zen_workspace_mapper.py        # Map Arc spaces to Zen workspaces
+│   └── zen_schema_analyzer.py         # Analyze Zen database schema
+├── .gitignore                         # Excludes generated files
+└── README.md                          # This file
 ```
 
 ## 🔍 Detailed Usage
@@ -181,7 +171,6 @@ python3 src/zen_pinned_tab_importer.py --dry-run
 ### Command Line Options
 
 - `--dry-run` - Test migration without making changes
-- `--min-visits N` - Only migrate bookmarks with N+ visits (default: 2)
 - `--zen-profile NAME` - Specify target Zen profile name
 - `--arc-space NAME` - Migrate only a specific Arc space by name (case-insensitive partial matching). If not specified, all spaces are migrated.
 - `--verbose` - Enable detailed debug logging
@@ -209,7 +198,7 @@ The tool creates several files during migration (all excluded from git):
 ### Space Icon Migration
 **✅ Implemented**: Arc space icons migrate to Zen workspaces as Unicode emojis.
 
-**Technical Solution**: Extracts Unicode emojis from Arc's `customInfo.iconType.emoji_v2` field and stores them in Zen's `zen_workspaces.icon` column.
+**Technical Solution**: Extracts Unicode emojis from Arc's `customInfo.iconType.emoji_v2` field and preserves them in Zen workspace definitions.
 
 **Result**: Arc space icons (🏠, 🌳, 🎬, ⚖️, etc.) appear as visual icons in Zen workspaces.
 
@@ -289,21 +278,15 @@ If anything goes wrong:
 - **Location**: `~/Library/Application Support/zen/Profiles/[profile]/` (macOS)
 - **Format**: Firefox-based
 - **Key Files**:
-  - `places.sqlite` — main database (bookmarks, workspace metadata)
-  - `zen-sessions.jsonlz4` — **source of truth for rendered tabs** (Mozilla LZ4 format)
-  - `containers.json` — container/space definitions
-  - `prefs.js` — preferences including active workspace
+  - `zen-sessions.jsonlz4` (Zen 1.18+: spaces, pinned tabs, folders)
+  - `places.sqlite` (bookmarks database)
+  - `containers.json` (workspace container definitions)
+  - `prefs.js` (preferences)
 
-### Database Schema
-- **zen_pins** table: Stores pinned tab metadata (not used for rendering)
-- **zen_workspaces** table: Workspace definitions with UUIDs, icons, colors
-- **moz_bookmarks**: Standard Firefox bookmarks (backup import)
-
-### Session File Format (`zen-sessions.jsonlz4`)
-Mozilla LZ4 format: `mozLz40\0` magic + 4-byte LE uncompressed size + lz4 block.
-Contains a JSON object with:
-- `spaces[]` — workspace definitions (uuid, name, icon, position)
-- `tabs[]` — all browser tabs with `zenWorkspace`, `pinned`, `zenEssential` fields
+### Storage Formats
+- **Zen 1.18+**: `zen-sessions.jsonlz4` — mozlz4-compressed JSON containing spaces, tabs, and folders
+- **Legacy Zen**: `zen_pins` and `zen_workspaces` SQLite tables in `places.sqlite`
+- **Bookmarks**: Standard Firefox `moz_bookmarks`/`moz_places` tables (used as backup)
 
 ## 🤝 Contributing
 

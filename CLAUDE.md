@@ -9,6 +9,7 @@ This is a Python-based migration tool that converts Arc browser spaces and pinne
 ## Common Commands
 
 ### Migration Commands
+
 ```bash
 # Basic migration
 python3 migrate_arc_to_zen.py
@@ -21,6 +22,7 @@ python3 migrate_arc_to_zen.py --verbose
 ```
 
 ### Component Testing
+
 ```bash
 # Test Arc data extraction
 python3 src/arc_pinned_tab_extractor.py
@@ -32,6 +34,7 @@ python3 src/zen_workspace_mapper.py
 ## Architecture Overview
 
 ### Migration Pipeline (4-Step Process)
+
 1. **Arc Data Extraction** - Extract from `~/Library/Application Support/Arc/StorableSidebar.json`
 2. **Zen Profile Discovery** - Locate Zen profiles in `~/Library/Application Support/zen/Profiles/`
 3. **Container/Workspace Creation** - Create Zen containers and workspaces for each Arc space
@@ -40,24 +43,22 @@ python3 src/zen_workspace_mapper.py
 
 ### Key Components
 
-**`migrate_arc_to_zen.py`** - Main orchestrator with `Arc2ZenMigrator` class
-- Coordinates entire migration process (Steps 1-4)
+**`migrate_arc_to_zen.py`**
+
+- Main orchestrator with `Arc2ZenMigrator` class
+- Coordinates entire migration process
 - Handles dry-run mode, logging, database backups
 
-**`inject_session_tabs.py`** - Session tab injector (Step 5)
-- Injects all Arc tabs into `zen-sessions.jsonlz4` as real browser tabs
-- This is the step that makes tabs actually appear in Zen's sidebar
-- Idempotent: re-running replaces previously-injected tabs
-- Requires `lz4` package: `pip install lz4`
+**`arc_pinned_tab_extractor.py`**
 
-**`arc_pinned_tab_extractor.py`** - Most complex component
-- Parses Arc's nested JSON structure with container-based ordering
-- Extracts pinned tabs, open tabs, Essential tabs, and folder hierarchy
-- Uses container `childrenIds` for exact visual ordering
-- Data classes: `ArcPinnedTab`, `ArcOpenTab`, `ArcFolder`, `ArcSpace`
+- Most complex component (22KB)
+- Parses Arc's nested JSON structure with sync data
+- Preserves original sidebar ordering via global index tracking
+- Data classes: `ArcPinnedTab`, `ArcFolder`, `ArcSpace`
 
 **Zen Importer Components:**
-- `zen_pinned_tab_importer.py` - Import to `zen_pins` table (metadata only)
+
+- `zen_pinned_tab_importer.py` - Direct import to `zen_pins` table
 - `zen_workspace_importer.py` - Creates workspaces in `zen_workspaces` table
 - `zen_space_importer.py` - Manages containers in `containers.json`
 - `zen_bookmark_importer.py` - Backup import as Firefox bookmarks
@@ -66,6 +67,7 @@ python3 src/zen_workspace_mapper.py
 ### Data Flow
 
 **Arc Source:**
+
 ```
 StorableSidebar.json
 ├── firebaseSyncState.syncData.spaceModels (space metadata + icons)
@@ -75,6 +77,7 @@ StorableSidebar.json
 ```
 
 **Zen Target:**
+
 ```
 Zen Profile/
 ├── places.sqlite (main database)
@@ -100,6 +103,7 @@ Zen Profile/
 Arc's storage order ≠ display order. Each space has a **container UUID** (not "pinned" string) that contains a `childrenIds` array with items in **exact Arc display order**.
 
 **Correct Data Structure:**
+
 ```json
 // Each space has containerIDs like:
 space_data.containerIDs = ['unpinned', 'uuid-1', 'pinned', 'uuid-2']
@@ -116,6 +120,7 @@ data.sidebar.containers[1].items['BDF69180-4E9B-4B4A-B1B4-D6950292683E'].childre
 **Key Insight:** The strings "pinned" and "unpinned" are markers in the `containerIDs` array. The UUID immediately *following* each marker is the actual container storing that category's `childrenIds` (display order). The marker order can vary — some spaces have `['pinned', uuid, 'unpinned', uuid]`, others have `['unpinned', uuid, 'pinned', uuid]`.
 
 **Implementation (Working):**
+
 ```python
 def _get_space_display_order(self, space_id, items_lookup, data):
     """Get pinned tab display order using the container after 'pinned' marker."""
@@ -128,25 +133,35 @@ def _get_space_display_order(self, space_id, items_lookup, data):
             ...
 ```
 
+**Results Achieved:**
+
+- **Before**: Site, Games, Large Language Models... (Arc index 6, 20, 24)
+- **After**: Finances, Large Language Models, Health, Games... (Arc visual order) ✅
+- **Perfect match**: Extraction now matches Arc sidebar exactly
+
 **Process Flow:**
-1. **Find space container markers** from `space_data.containerIDs`
-2. **Follow each marker** — the UUID immediately after 'pinned' is the pinned container
-3. **Extract `childrenIds`** from that container (exact visual order)
+
+1. **Find space container UUIDs** from `space_data.containerIDs`
+2. **Locate display container** that has `childrenIds` array
+3. **Extract in order** using `childrenIds` sequence (not Arc index sorting)
 4. **Process recursively** for folder contents using their own `childrenIds`
 5. **Repeat for 'unpinned'** marker to get open tabs
 
 ### Folder Hierarchy
+
 - Path-based folder UUID mapping: `folder_path → folder_uuid`
 - Recursive parent-child relationships via `folder_parent_uuid`
 - Folders created before tabs in proper dependency order
 
 ### Database Safety
+
 - Read-only access to Arc data (never modifies original)
 - Automatic database backups before Zen modifications
 - Transaction-based operations with rollback capabilities
 - Zen browser must be closed during migration to prevent database locks
 
 ### Generated Files
+
 - `arc_pinned_tabs_export.json` - Extracted Arc data
 - `zen_database_backup_*.sqlite` - Automatic backups
 - `workspace_setup_guide.json` - Manual setup instructions
@@ -154,16 +169,16 @@ def _get_space_display_order(self, space_id, items_lookup, data):
 ## Key Algorithms
 
 ### UUID Management
+
 Temporary workspace UUIDs are created during import, then consolidated via `zen_workspace_mapper.py`. This prevents conflicts and allows proper cross-table relationship updates.
 
 ### Container Assignment
+
 Round-robin icon/color assignment for new containers with existing container detection and reuse based on space names.
 
 ## Development Notes
 
-- Python 3.7+ with minimal dependencies (`lz4` for session file I/O)
+- Python 3.7+ with `lz4` as the only external dependency
 - All components include extensive logging for debugging
 - Dry-run mode available for safe testing
 - Error handling includes graceful degradation and detailed error reporting
-- `inject_session_tabs.py` is idempotent — safe to re-run after fixing extraction bugs
-- `local/` directory is gitignored for user-specific scripts with hardcoded paths
