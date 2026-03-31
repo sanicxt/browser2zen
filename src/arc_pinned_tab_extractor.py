@@ -134,7 +134,7 @@ class ArcPinnedTabExtractor:
                     profile = custom_data.get('directoryBasename')
 
                 # If no profile is set (Personal space), map to "Default" profile
-                if profile is None and space_name == "Personal":
+                if profile is None:
                     profile = "Default"
 
                 # Extract color from windowTheme if available
