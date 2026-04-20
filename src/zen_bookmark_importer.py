@@ -63,12 +63,7 @@ class ZenBookmarkImporter:
             logger.error(f"Zen places.sqlite not found: {self.places_db}")
             return False
 
-        # Check for profile lock file
         parentlock = self.zen_profile_path / ".parentlock"
-        if parentlock.exists():
-            logger.error("❌ Zen profile is locked (.parentlock exists)")
-            logger.error("   Make sure Zen browser is completely closed")
-            return False
 
         try:
             # Test read access
@@ -86,6 +81,17 @@ class ZenBookmarkImporter:
             conn.close()
 
             logger.info("✅ Zen database accessible")
+            # .parentlock is often left behind after a crash or force-quit; if the DB
+            # is not actually locked, treat it as stale so migration can proceed.
+            if parentlock.exists():
+                logger.warning(
+                    "Removing stale .parentlock (database is not locked; "
+                    "Zen was likely not fully shut down last time)"
+                )
+                try:
+                    parentlock.unlink()
+                except OSError as e:
+                    logger.warning("Could not remove .parentlock (%s); continuing anyway", e)
             return True
         except sqlite3.OperationalError as e:
             error_msg = str(e).lower()

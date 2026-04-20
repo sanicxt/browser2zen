@@ -62,20 +62,90 @@ def find_zen_profile():
             f"No Zen profile found. Looked in: {base}\n"
             "Make sure Zen browser has been run at least once."
         )
-    return os.path.dirname(matches[0])
+    profiles = [os.path.dirname(m) for m in matches]
+    with_sessions = [
+        p for p in profiles
+        if os.path.isfile(os.path.join(p, 'zen-sessions.jsonlz4'))
+    ]
+    candidates = with_sessions if with_sessions else profiles
+
+    def _profile_recency(p):
+        sess = os.path.join(p, 'zen-sessions.jsonlz4')
+        if os.path.isfile(sess):
+            return os.path.getmtime(sess)
+        return os.path.getmtime(os.path.join(p, 'places.sqlite'))
+
+    return max(candidates, key=_profile_recency)
+
+
+def _container_ids_by_space_name(profile_path):
+    """Map workspace/container name -> userContextId from containers.json."""
+    path = os.path.join(profile_path, 'containers.json')
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, encoding='utf-8') as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+    out = {}
+    for ident in data.get('identities', []):
+        raw = ident.get('name') or ident.get('l10nId', '').replace('user-context-', '')
+        cid = ident.get('userContextId')
+        if not raw or cid is None:
+            continue
+        out[raw] = int(cid)
+        out[raw.lower()] = int(cid)
+    return out
+
+
+def _workspace_map_from_zen_sessions(profile_path):
+    """Zen 1.18+: workspaces live in zen-sessions.jsonlz4, not places.sqlite."""
+    sess_file = os.path.join(profile_path, 'zen-sessions.jsonlz4')
+    session = read_mozlz4(sess_file)
+    containers = _container_ids_by_space_name(profile_path)
+    result = {}
+    for space in session.get('spaces', []):
+        name = space.get('name')
+        ws_uuid = space.get('uuid')
+        if not name or not ws_uuid:
+            continue
+        cid = space.get('container_id', space.get('userContextId'))
+        if cid is None:
+            cid = containers.get(name)
+            if cid is None:
+                cid = containers.get(name.lower(), 0)
+        else:
+            cid = int(cid)
+        result[name] = {'uuid': ws_uuid, 'container_id': int(cid)}
+    return result
 
 
 def get_workspace_map(profile_path):
-    # Read workspace name → {uuid, container_id} from zen_workspaces table
+    """Workspace name → {uuid, container_id} for legacy DB or modern session file."""
     db = os.path.join(profile_path, 'places.sqlite')
-    conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
-    result = {}
-    for name, ws_uuid, cid in conn.execute(
-        'SELECT name, uuid, container_id FROM zen_workspaces ORDER BY position'
-    ).fetchall():
-        result[name] = {'uuid': ws_uuid, 'container_id': cid or 0}
-    conn.close()
-    return result
+    if os.path.isfile(db):
+        try:
+            conn = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+            cur = conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='zen_workspaces' LIMIT 1"
+            )
+            if cur.fetchone():
+                result = {}
+                for name, ws_uuid, cid in conn.execute(
+                    'SELECT name, uuid, container_id FROM zen_workspaces ORDER BY position'
+                ).fetchall():
+                    result[name] = {'uuid': ws_uuid, 'container_id': cid or 0}
+                conn.close()
+                return result
+            conn.close()
+        except sqlite3.Error:
+            pass
+
+    sess_file = os.path.join(profile_path, 'zen-sessions.jsonlz4')
+    if os.path.isfile(sess_file):
+        return _workspace_map_from_zen_sessions(profile_path)
+    return {}
 
 
 # ---------------------------------------------------------------------------
