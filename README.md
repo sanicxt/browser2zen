@@ -1,350 +1,205 @@
-# Arc to Zen Browser Migration Tool
+# Arc → Zen
 
-A complete Python-based migration tool that converts Arc browser spaces, pinned tabs, and open tabs into Zen browser workspaces with proper tab assignment.
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20arm64-lightgrey?logo=apple)](https://github.com/rafcabezas/arc2zen/releases/latest)
+[![Python](https://img.shields.io/badge/python-3.7%2B-yellow?logo=python&logoColor=white)](https://www.python.org/)
+[![PyWebView](https://img.shields.io/badge/GUI-PyWebView-5e86ff)](https://pywebview.flowrl.com/)
+[![Latest release](https://img.shields.io/github/v/release/rafcabezas/arc2zen?display_name=tag&label=release)](./releases/latest)
 
-## 🖥️ GUI app (macOS)
+Move your Arc browser setup to [Zen Browser](https://zen-browser.app/)
+in under a minute. Workspaces, pinned tabs, folders, bookmarks, browsing
+history, and login state, all carried across.
 
-A polished single-window app wraps the migration tool. Welcome screen,
-browser detection with one-click quit, preview of what will be migrated,
-live progress with per-step detail, success/error screens, and a backup
-manager for restoring or deleting backup files.
+A polished single-window app handles the whole migration for you. No
+terminal, no Python, no install steps to follow.
 
-```bash
-# From the repo root
-pip install -r requirements.txt pywebview
-python -m app
-```
+---
 
-The same code path that powers the CLI is used by the GUI: the
-`MigrationOrchestrator` facade in `app/orchestrator.py` wraps the importer
-classes in `src/` without modifying them, and structured progress events
-are pushed through a `logging.Handler` that the JS frontend polls. See
-`app/` for the source.
+## Install (macOS, Apple Silicon)
 
-## 🚀 Quick Start
+1. Open the [latest release](./releases/latest) and download
+   `Arc2Zen-x.y.z-arm64.dmg`.
+2. Double-click the DMG to mount it, then double-click `Arc2Zen.app`.
+3. macOS will show a dialog ("damaged" or "cannot verify"). Click
+   **Done**. Do **not** click "Move to Trash".
+4. Open  → **System Settings** → **Privacy & Security**.
+5. Scroll the right pane until you see *"Arc2Zen was blocked to
+   protect your Mac."* Click **Open Anyway**.
+6. Enter your Mac password if prompted.
+7. macOS shows one final confirmation. Click **Open Anyway**.
 
-### Prerequisites
+The app launches and walks you through detection, preview, and
+migration. Steps 3 to 7 only happen the first time. After that you can
+double-click `Arc2Zen.app` normally.
 
-- **Python 3.7+**
-- **Arc Browser** (with spaces and pinned tabs you want to migrate)
-- **Zen Browser** (installed and run at least once)
-- **macOS** or **Windows** (current implementation)
-- **lz4** Python package (for session tab injection): `pip install lz4`
+When you're done, drag the DMG to the Trash. Arc2Zen runs from inside
+the DMG and doesn't install itself anywhere.
 
-### Installation
+> **Why all the steps?** Apple charges $99/year for the developer
+> certificate that removes this prompt. Arc2Zen is free open-source
+> software and that fee isn't worth passing on. The bundle is ad-hoc
+> codesigned, so you can verify its contents have not been tampered
+> with at any time:
+>
+> ```
+> codesign --verify --deep --strict /Volumes/Arc2Zen/Arc2Zen.app
+> ```
 
-1. Clone this repository:
+### Don't have Zen yet?
+
+If Zen Browser isn't installed yet, the detection screen offers a
+**Download Zen** button. Install Zen, launch it once so it creates
+your profile, then click **Recheck** in Arc2Zen and continue.
+
+---
+
+## What gets migrated
+
+| | |
+| --- | --- |
+| **Spaces** | Each Arc space becomes a Zen workspace, with its emoji icon and colour theme. |
+| **Pinned tabs** | All pinned tabs land on the matching workspace, in their original order. |
+| **Folders** | The full nested folder hierarchy is preserved, collapsed by default to keep your sidebar clean. |
+| **Essential tabs** | Arc's top-toolbar Essentials become pinned tabs on the right space. |
+| **Open tabs** | Optional. Live tabs become real Zen tabs. |
+| **Bookmarks** | Pinned tabs are also mirrored to Firefox bookmarks as a backup. |
+| **Favicons** | Arc's cached icons are inlined so tabs show their icons immediately, with no waiting for refetch. |
+| **History** | Optional. Browsing history with original timestamps is copied over. |
+| **Login state** | Optional, macOS only. Arc cookies are decrypted (one-time Keychain prompt) and re-encrypted into Zen so you stay logged in to Gmail, Twitter, and the rest. |
+
+Every step writes a timestamped backup beside your Zen profile before
+it changes anything, and Arc data is read-only. The Backups screen
+inside the app lets you restore or delete those backups any time.
+
+---
+
+## Run from source
+
+For Linux, Intel Mac, contributors, or anyone who'd rather skip the DMG:
+
 ```bash
 git clone https://github.com/rafcabezas/arc2zen.git
 cd arc2zen
+pip install -r requirements.txt
+
+# CLI
+python3 migrate_arc_to_zen.py --dry-run    # preview only
+python3 migrate_arc_to_zen.py              # actual migration
+
+# GUI (macOS only)
+pip install -r requirements-build.txt
+python -m app
 ```
 
-2. Install the optional dependency for session tab injection:
-```bash
-pip install lz4
-```
+The CLI accepts `--zen-profile NAME`, `--arc-space NAME`,
+`--folders-open`, `--skip-favicons`, `--open-tabs`, `--verbose`, and
+`--dry-run`. Use `python3 migrate_arc_to_zen.py --help` for the full
+list.
 
-### Basic Usage
-
-Run the complete migration (recommended for first-time users):
-
-```bash
-# Dry run first to see what will be migrated
-python3 migrate_arc_to_zen.py --dry-run
-
-# If everything looks good, run the actual migration
-python3 migrate_arc_to_zen.py
-
-# Then inject all tabs into the session file (makes tabs actually appear)
-python3 inject_session_tabs.py
-```
-
-### Important: Session Tab Injection
-
-After running the main migration, tabs may only appear as bookmarks or metadata.
-To make them show up as **real browser tabs** in Zen's sidebar, run:
+Individual importers can be run on their own. They are all idempotent
+and produce timestamped backups:
 
 ```bash
-# Migrate with custom settings
-python3 migrate_arc_to_zen.py --zen-profile "Default" --verbose
+python3 src/arc_history_importer.py --zen-profile "Default (release)"
+python3 src/arc_cookies_importer.py --zen-profile "Default (release)"
+python3 src/zen_favicon_importer.py --zen-profile "Default (release)"
 ```
 
-This writes directly to `zen-sessions.jsonlz4`, which is the file Zen actually
-reads to render tabs. The script is idempotent — re-running it replaces
-previously-injected tabs with a fresh extraction.
+---
 
-### Advanced Usage
+## How it works
+
+The migration runs as a fixed pipeline of independent importers, each
+of which reads Arc data through a snapshot copy of the source SQLite
+file (so Arc itself is never touched) and writes to its corresponding
+Zen file with a backup taken first.
+
+| Step | Reads (Arc) | Writes (Zen) |
+| --- | --- | --- |
+| Spaces & pinned tabs | `StorableSidebar.json` | `zen-sessions.jsonlz4`, `containers.json` |
+| Bookmarks | `StorableSidebar.json` | `places.sqlite` |
+| Favicons | `Default/Favicons` | `favicons.sqlite`, plus inline `image` data URIs in `zen-sessions.jsonlz4` |
+| History | `Default/History` | `places.sqlite` |
+| Cookies | `Default/Cookies` (AES-128-CBC, key from macOS Keychain) | `cookies.sqlite` (incl. all per-space containers) |
+
+A few things that took some reverse-engineering and might be useful if
+you're hacking on this:
+
+- **Firefox `places::HashURL`** is the 48-bit hash function used in
+  `moz_places.url_hash`, `moz_pages_w_icons.page_url_hash`, and
+  `moz_icons.fixed_icon_url_hash`. Implementation in
+  `src/zen_favicon_importer.py`.
+- **Modern Zen renders pinned-tab favicons from each tab's inline
+  `image` data URI in `zen-sessions.jsonlz4`**, not from
+  `favicons.sqlite`. Writing only the SQLite store leaves the sidebar
+  blank.
+- **`moz_cookies.expiry` switched from seconds to milliseconds around
+  Firefox 108.** Storing seconds makes Firefox treat every cookie as
+  expired in 1970 and purge them all on next startup.
+- **Cookies in container tabs are isolated.** Cookies imported with
+  empty `originAttributes` are invisible to per-space containers, so
+  each cookie is also written under `^userContextId=N` for every
+  container the migration creates.
+
+The GUI in `app/` wraps the same importer classes from `src/` without
+modifying them. Architecture details are in [CLAUDE.md](./CLAUDE.md).
+
+---
+
+## Troubleshooting
+
+- **"Zen profile not found"**: launch Zen once so it creates the
+  profile, then click Recheck.
+- **"No Arc data found"**: make sure Arc has been opened at least
+  once and has at least one pinned tab.
+- **Cookies didn't carry over**: close Zen completely before running
+  (Firefox holds an exclusive lock on `cookies.sqlite` while open) and
+  approve the Keychain prompt that appears on first run.
+- **Something looks wrong after migration**: open the **Backups**
+  screen in the app and restore the most recent backup of the relevant
+  file. Or close Zen and copy any of the `*.backup.<timestamp>` files
+  in your Zen profile directory back over the live file.
+
+For anything else, [open an issue](./issues).
+
+---
+
+## Contributing
+
+Pull requests welcome. The codebase is plain Python 3.7+ with a single
+runtime dependency (`lz4`) plus `cryptography` for the cookies path.
+The GUI uses PyWebView (Python) + vanilla HTML/CSS/JS with no build
+step.
 
 ```bash
-# Migrate only a specific Arc space
-python3 migrate_arc_to_zen.py --arc-space "Personal"
-python3 migrate_arc_to_zen.py --arc-space "Work" --dry-run
-
-# Specify Zen profile
-python3 migrate_arc_to_zen.py --zen-profile "Default"
-
-# Also migrate open tabs via sessionstore (legacy approach)
-python3 migrate_arc_to_zen.py --open-tabs
-
-# Verbose logging
-python3 migrate_arc_to_zen.py --verbose
-
-# See all available options
-python3 migrate_arc_to_zen.py --help
+git clone https://github.com/rafcabezas/arc2zen.git
+cd arc2zen
+pip install -r requirements.txt -r requirements-build.txt
+python3 migrate_arc_to_zen.py --dry-run --verbose   # CLI smoke test
+python -m app --debug                               # GUI with WebKit DevTools
 ```
 
-## 📋 What Gets Migrated
-
-- **Arc Spaces** → **Zen Workspaces** (each Arc space becomes a Zen workspace)
-- **Space Icons** → **Workspace Icons** (Unicode emojis preserved: 🏠, 🌳, 🎬, ⚖️, etc.)
-- **Space Colors** → **Workspace Themes** (Arc's subtle color tints accurately reproduced)
-- **Pinned Tabs** → **Zen Pinned Tabs** (with folder structure preserved)
-- **Essential Tabs** → **Essential Pinned Tabs** (Arc's top toolbar tabs with large icons)
-- **Open Tabs** → **Zen Open Tabs** (unpinned tabs restored as real browser tabs)
-- **Folder Hierarchy** → **Zen Folder Structure** (nested folders maintained)
-- **Display Order** → **Zen Sidebar Order** (Arc visual ordering preserved)
-- **Backup Bookmarks** → **Firefox Bookmarks** (additional backup as standard bookmarks)
-- **Favicons** → **Zen Favicons** (Arc's cached icons copied so tabs show their icons immediately, both as inline `image` data URIs in the session and in `favicons.sqlite`)
-- **History** → **Zen History** (browsing history with visit timestamps preserved; via `arc_history_importer.py`)
-- **Cookies** → **Zen Cookies** (decrypted using the macOS Keychain "Arc Safe Storage" key; cookies are also duplicated into the per-space containers so logins work in container tabs; via `arc_cookies_importer.py`)
-
-## 🆕 New in this fork
-
-- Favicons import (no more grey blank icons after migration)
-- Folders import collapsed by default — pass `--folders-open` for the previous behaviour
-- Space emoji icons and Arc color themes properly carried into Zen workspaces
-- Standalone `arc_history_importer.py` and `arc_cookies_importer.py` for history and cookies (macOS only for cookies)
-
-## 🔧 How It Works
-
-### Step 1: Analyze Your Arc Data
-The tool reads Arc's `StorableSidebar.json` to extract:
-- Space names, structure, and icons (Unicode emojis when available)
-- Pinned tabs with URLs and metadata
-- Open (unpinned) tabs per space
-- Folder hierarchy within each space
-- Visual ordering using container childrenIds
-
-### Step 2: Map Workspaces
-The tool helps you map Arc spaces to Zen workspaces:
-```bash
-python3 src/zen_workspace_mapper.py
-```
-This creates a mapping guide showing which Zen workspace UUID corresponds to each Arc space.
-
-### Step 3: Import Pinned Tabs & Workspaces
-For **Zen 1.18+**, spaces, pinned tabs, and folders are written directly to `zen-sessions.jsonlz4` — the modern storage format for Zen's sidebar. For older Zen versions, the tool falls back to the legacy `zen_pins` and `zen_workspaces` SQLite tables.
-
-## 🛡️ Safety Features
-
-- **Read-only Arc access** - Your Arc data is never modified
-- **Automatic backups** - Zen database is backed up before any changes
-- **Dry-run mode** - Test migration without making changes
-- **Validation** - Data integrity checks throughout the process
-
-## 📁 File Structure
-
-```
-arc2zen/
-├── migrate_arc_to_zen.py              # Main migration script
-├── requirements.txt                   # Python dependencies (lz4)
-├── src/
-│   ├── arc_pinned_tab_extractor.py    # Extract Arc pinned tabs
-│   ├── arc_bookmark_extractor.py      # Extract Arc bookmarks
-│   ├── arc_profile_discovery.py       # Locate Arc profiles
-│   ├── zen_sessions_importer.py       # Import to zen-sessions.jsonlz4 (Zen 1.18+)
-│   ├── zen_sessionstore_manager.py    # Read/write mozlz4 sessionstore
-│   ├── zen_pinned_tab_importer.py     # Legacy: import tabs to zen_pins table
-│   ├── zen_workspace_importer.py      # Legacy: create zen_workspaces entries
-│   ├── zen_space_importer.py          # Create Zen containers for spaces
-│   ├── zen_bookmark_importer.py       # Backup import as Firefox bookmarks
-│   ├── zen_workspace_mapper.py        # Map Arc spaces to Zen workspaces
-│   └── zen_schema_analyzer.py         # Analyze Zen database schema
-├── .gitignore                         # Excludes generated files
-└── README.md                          # This file
-```
-
-## 🔍 Detailed Usage
-
-### Workspace Mapping
-
-Before running the full migration, you may want to map your Arc spaces to Zen workspaces:
+To produce a `.dmg` locally:
 
 ```bash
-python3 src/zen_workspace_mapper.py
+bash build/make_app.sh   # produces dist/Arc2Zen.app
+bash build/make_dmg.sh   # produces dist/Arc2Zen-<version>-arm64.dmg
 ```
 
-This interactive script will:
-1. Analyze your current Zen workspace structure
-2. Ask for your Arc space names (or detect them automatically)
-3. Create a mapping guide at `workspace_uuid_mapping.json`
-4. Show you which UUID corresponds to each workspace
+CI builds happen automatically on every `v*` git tag via
+[`.github/workflows/release.yml`](./.github/workflows/release.yml).
 
-### Individual Components
+---
 
-You can also run individual components:
+## License
 
-```bash
-# Extract Arc pinned tabs only
-python3 src/arc_pinned_tab_extractor.py
+MIT, see [LICENSE](./LICENSE).
 
-# Analyze Zen database schema
-python3 src/zen_schema_analyzer.py
+Always back up your data before running migrations. Use at your own
+risk.
 
-# Import pinned tabs to Zen (advanced usage)
-python3 src/zen_pinned_tab_importer.py --dry-run
-```
+## Acknowledgements
 
-## ⚙️ Configuration
-
-### Command Line Options
-
-- `--dry-run` - Test migration without making changes
-- `--zen-profile NAME` - Specify target Zen profile name
-- `--arc-space NAME` - Migrate only a specific Arc space by name (case-insensitive partial matching). If not specified, all spaces are migrated.
-- `--verbose` - Enable detailed debug logging
-- `--help` - Show all available options
-
-### Generated Files
-
-The tool creates several files during migration (all excluded from git):
-
-- `arc_bookmarks_export.json` - Extracted Arc pinned tabs
-- `arc_pinned_tabs_export.json` - Arc pinned tabs with workspace info
-- `workspace_uuid_mapping.json` - Mapping between Arc spaces and Zen workspaces
-- `*.backup.*` - Database backups
-
-## 🎯 Arc Display Order Solution
-
-**✅ Improved**: The migration tool preserves Arc's visual ordering using Arc's internal container structure.
-
-**Technical Solution**: Arc stores display order in each space's pinned container `childrenIds` array, which contains items in visual order. The migration tool uses this data structure to maintain ordering fidelity.
-
-**Result**: Folders and tabs appear in Zen in a similar order to your Arc sidebar.
-
-## 🎨 Visual Migration Features
-
-### Space Icon Migration
-**✅ Implemented**: Arc space icons migrate to Zen workspaces as Unicode emojis.
-
-**Technical Solution**: Extracts Unicode emojis from Arc's `customInfo.iconType.emoji_v2` field and preserves them in Zen workspace definitions.
-
-**Result**: Arc space icons (🏠, 🌳, 🎬, ⚖️, etc.) appear as visual icons in Zen workspaces.
-
-### Space Color Migration
-**✅ Implemented**: Arc space colors migrate as subtle workspace themes with pixel-perfect accuracy.
-
-**Technical Solution**:
-- Extracts RGB values from Arc's `customInfo.windowTheme.primaryColorPalette.midTone`
-- Uses measured Arc color values (e.g., Personal green: #bbf6da, WillowTree gold: #fbe496)
-- Applies Arc's exact color transformation algorithm to create matching subtle tints
-- Stores as JSON theme data in Zen's workspace theme system (`theme_type`, `theme_colors`)
-
-**Result**: Zen workspace backgrounds closely match Arc's subtle color aesthetics.
-
-### Essential Tabs Migration
-**✅ Implemented**: Arc's Essential tabs (top toolbar) migrate to appropriate workspaces.
-
-**Technical Solution**:
-- Extracts Essential tabs from Arc's `topApps` containers per profile
-- Maps tabs to correct workspaces using profile associations (`directoryBasename`)
-- Imports with `is_essential` flag to distinguish from regular pinned tabs
-
-**Result**: Arc's Essential tabs appear as pinned tabs in their respective Zen workspaces.
-
-## ⚠️ Minor Limitations
-
-### Folder Visual Styles
-- Arc's custom folder icons/colors are not preserved (Zen uses its own folder styling)
-- All folder hierarchy and content relationships are maintained
-
-### Browser-Specific Features
-- Arc-specific features (like Boosts, Easels) don't have Zen equivalents and are not migrated
-- Standard web content, bookmarks, and organizational structure migrate completely
-
-### What's Now Supported ✅
-- **Space icons**: Arc space emojis migrate as Unicode icons in Zen
-- **Space colors**: Arc color themes migrate as Zen workspace themes
-- **Essential tabs**: Arc's top toolbar tabs migrate to appropriate workspaces
-- **Display ordering**: Arc sidebar ordering preserved via container childrenIds
-- **Folder hierarchy**: Nested folder structure maintained
-- **Workspace mapping**: Arc space → Zen workspace conversion
-
-## 🐛 Troubleshooting
-
-### Common Issues
-
-**"Zen profile not found"**
-- Make sure Zen browser has been run at least once
-- Check that the profile directory exists at `~/Library/Application Support/zen/Profiles/`
-
-**"No Arc data found"**
-- Verify Arc browser is installed
-- Check that you have spaces with pinned tabs
-
-**Workspace mapping issues**
-- Run `python3 src/zen_workspace_mapper.py` to manually map spaces
-- Update the generated `workspace_uuid_mapping.json` file
-
-### Data Recovery
-
-If anything goes wrong:
-1. The tool creates automatic backups of your Zen database
-2. You can restore from the `.backup` files
-3. Your Arc data remains unchanged (read-only access)
-
-## 🔬 Technical Details
-
-### Arc Browser Structure
-- **Location**: `~/Library/Application Support/Arc/` (macOS)
-- **Format**: Chromium-based with Arc-specific extensions
-- **Key File**: `StorableSidebar.json` contains spaces, pinned tabs, and folder hierarchy
-- **Container ordering**: Each space has `containerIDs: ['pinned', uuid, 'unpinned', uuid]`
-  where the UUID immediately following each marker stores that category's `childrenIds`
-  in exact visual order. The marker order can vary (pinned-first or unpinned-first).
-
-### Zen Browser Structure
-- **Location**: `~/Library/Application Support/zen/Profiles/[profile]/` (macOS)
-- **Format**: Firefox-based
-- **Key Files**:
-  - `zen-sessions.jsonlz4` (Zen 1.18+: spaces, pinned tabs, folders)
-  - `places.sqlite` (bookmarks database)
-  - `containers.json` (workspace container definitions)
-  - `prefs.js` (preferences)
-
-### Storage Formats
-- **Zen 1.18+**: `zen-sessions.jsonlz4` — mozlz4-compressed JSON containing spaces, tabs, and folders
-- **Legacy Zen**: `zen_pins` and `zen_workspaces` SQLite tables in `places.sqlite`
-- **Bookmarks**: Standard Firefox `moz_bookmarks`/`moz_places` tables (used as backup)
-
-## 🤝 Contributing
-
-Contributions are welcome! This is an open source tool for the community.
-
-### Development Setup
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
-### Testing
-
-Always test with dry-run first:
-```bash
-python3 migrate_arc_to_zen.py --dry-run --verbose
-```
-
-## 📄 License
-
-MIT License - See LICENSE file for details.
-
-**⚠️ Important**: Always backup your data before running migrations. Use at your own risk.
-
-## 🙏 Acknowledgments
-
-- Arc Browser team for creating an innovative browser
-- Zen Browser team for building a privacy-focused alternative
-- The open source community for inspiration and tools
-- Claude Code for AI-assisted development and debugging
+- Arc Browser team for the original product.
+- Zen Browser team for the privacy-focused alternative.
+- The open source community for inspiration and tools.
