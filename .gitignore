@@ -27,9 +27,11 @@ dist/
 /build/__pycache__/
 *.spec.bak
 
-# Generated app icon. Re-rendered locally via build/make_iconset.sh and on
-# CI before each release, so it doesn't need to be checked in.
+# Generated app icons. Re-rendered locally via build/make_iconset.sh
+# (macOS) or build/make_iconset.ps1 (Windows), and on CI before each
+# release, so they don't need to be checked in.
 app/assets/icon.icns
+app/assets/icon.ico
 
 # Virtual environments
 venv/

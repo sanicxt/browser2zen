@@ -1,10 +1,11 @@
-# PyInstaller spec for the Arc2Zen GUI app.
+# PyInstaller spec for the Arc2Zen GUI app — macOS and Windows.
 #
 # Run from the repo root:
 #   pyinstaller build/arc2zen.spec
 #
-# Produces dist/Arc2Zen.app (arm64). The build script then ad-hoc signs it
-# and packages it into a .dmg via create-dmg.
+# Produces dist/Arc2Zen.app (macOS arm64) or dist/Arc2Zen/ (Windows x64).
+# The platform-specific build scripts (build/make_app.sh, build/make_exe.ps1)
+# wrap this and produce the final distributable artifact.
 
 # noqa: E402  (Analysis/PYZ/EXE/COLLECT/BUNDLE are injected by PyInstaller)
 
@@ -14,6 +15,38 @@ from pathlib import Path
 REPO_ROOT = Path.cwd().resolve()
 SRC_DIR = REPO_ROOT / "src"
 APP_DIR = REPO_ROOT / "app"
+
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
+
+# ---- platform-specific Analysis inputs -----------------------------------
+
+PLATFORM_HIDDEN_IMPORTS = (
+    [
+        "webview.platforms.cocoa",
+        "objc",
+        "Foundation",
+        "AppKit",
+        "WebKit",
+    ]
+    if IS_MAC
+    else [
+        # WebView2 backend on Windows. pywebview lazy-imports these via
+        # ``webview/platforms/edgechromium.py``; PyInstaller's static
+        # analysis doesn't see them without a hint.
+        "webview.platforms.edgechromium",
+        "webview.platforms.winforms",
+        "clr_loader",
+        "pythonnet",
+    ]
+)
+
+ICON_NAME = "icon.icns" if IS_MAC else "icon.ico"
+PLATFORM_ICON = str(APP_DIR / "assets" / ICON_NAME)
+
+# Don't pin ``target_arch`` on Windows: PyInstaller picks the host arch
+# correctly. Pinning would break if/when GitHub moves to ARM64 runners.
+TARGET_ARCH = "arm64" if IS_MAC else None
 
 block_cipher = None
 
@@ -31,9 +64,10 @@ a = Analysis(
         "lz4", "lz4.block",
         "cryptography",
         "cryptography.hazmat.primitives.ciphers",
+        "cryptography.hazmat.primitives.ciphers.aead",
         "cryptography.hazmat.primitives.kdf.pbkdf2",
-        "webview", "webview.platforms.cocoa",
-        "objc", "Foundation", "AppKit", "WebKit",
+        "webview",
+        *PLATFORM_HIDDEN_IMPORTS,
         "arc_pinned_tab_extractor",
         "zen_space_importer",
         "zen_sessions_importer",
@@ -69,10 +103,10 @@ exe = EXE(
     upx=False,
     console=False,
     disable_windowed_traceback=False,
-    target_arch="arm64",
+    target_arch=TARGET_ARCH,
     codesign_identity=None,
     entitlements_file=None,
-    icon=str(APP_DIR / "assets" / "icon.icns"),
+    icon=PLATFORM_ICON,
 )
 
 coll = COLLECT(
@@ -85,25 +119,26 @@ coll = COLLECT(
     name="Arc2Zen",
 )
 
-app = BUNDLE(
-    coll,
-    name="Arc2Zen.app",
-    icon=str(APP_DIR / "assets" / "icon.icns"),
-    bundle_identifier="com.tarikbc.arc2zen",
-    version="1.0.0",
-    info_plist={
-        "CFBundleName": "Arc2Zen",
-        "CFBundleDisplayName": "Arc2Zen",
-        "CFBundleVersion": "1.0.0",
-        "CFBundleShortVersionString": "1.0.0",
-        "NSHighResolutionCapable": True,
-        "NSRequiresAquaSystemAppearance": False,
-        "LSApplicationCategoryType": "public.app-category.utilities",
-        "LSMinimumSystemVersion": "12.0",
-        "NSSupportsAutomaticTermination": True,
-        # Reading the macOS Keychain to decrypt Arc cookies needs an
-        # explanation string the first time the user is prompted.
-        "NSDesktopFolderUsageDescription":
-            "Arc2Zen reads Arc cookies from your library to migrate login state.",
-    },
-)
+# BUNDLE() produces a .app on macOS only. On Windows the COLLECT() output
+# directory is itself the ship artifact.
+if IS_MAC:
+    app = BUNDLE(
+        coll,
+        name="Arc2Zen.app",
+        icon=PLATFORM_ICON,
+        bundle_identifier="com.arc2zen.app",
+        version="1.0.0",
+        info_plist={
+            "CFBundleName": "Arc2Zen",
+            "CFBundleDisplayName": "Arc2Zen",
+            "CFBundleVersion": "1.0.0",
+            "CFBundleShortVersionString": "1.0.0",
+            "NSHighResolutionCapable": True,
+            "NSRequiresAquaSystemAppearance": False,
+            "LSApplicationCategoryType": "public.app-category.utilities",
+            "LSMinimumSystemVersion": "12.0",
+            "NSSupportsAutomaticTermination": True,
+            "NSDesktopFolderUsageDescription":
+                "Arc2Zen reads Arc cookies from your library to migrate login state.",
+        },
+    )
