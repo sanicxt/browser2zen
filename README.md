@@ -85,6 +85,16 @@ python3 migrate_arc_to_zen.py --help
 - **Folder Hierarchy** → **Zen Folder Structure** (nested folders maintained)
 - **Display Order** → **Zen Sidebar Order** (Arc visual ordering preserved)
 - **Backup Bookmarks** → **Firefox Bookmarks** (additional backup as standard bookmarks)
+- **Favicons** → **Zen Favicons** (Arc's cached icons copied so tabs show their icons immediately, both as inline `image` data URIs in the session and in `favicons.sqlite`)
+- **History** → **Zen History** (browsing history with visit timestamps preserved; via `arc_history_importer.py`)
+- **Cookies** → **Zen Cookies** (decrypted using the macOS Keychain "Arc Safe Storage" key; cookies are also duplicated into the per-space containers so logins work in container tabs; via `arc_cookies_importer.py`)
+
+## 🆕 New in this fork
+
+- Favicons import (no more grey blank icons after migration)
+- Folders import collapsed by default — pass `--folders-open` for the previous behaviour
+- Space emoji icons and Arc color themes properly carried into Zen workspaces
+- Standalone `arc_history_importer.py` and `arc_cookies_importer.py` for history and cookies (macOS only for cookies)
 
 ## 🔧 How It Works
 
