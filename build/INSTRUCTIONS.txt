@@ -1,24 +1,26 @@
-Arc2Zen — first launch on macOS
-================================
+Arc2Zen — first launch
+=======================
 
-macOS will block Arc2Zen the very first time you open it because the
-app isn't notarized by Apple. This is a one-time setup you need to do.
-Follow these steps EXACTLY:
+Arc2Zen is unsigned (no $99/year Apple or Microsoft developer
+certificate), so the first time you open it the OS will block it. This
+is a one-time setup. Follow the steps for your platform exactly.
 
-  Step 1.  Double-click Arc2Zen.app inside this DMG.
+
+------ macOS ----------------------------------------------------------
+
+  Step 1.  Double-click Arc2Zen.app inside the mounted DMG.
 
   Step 2.  macOS shows a dialog: "'Arc2Zen' is damaged and can't be
            opened" or "Apple cannot check it for malicious software."
            Click "Done" (or "Cancel"). DO NOT click "Move to Trash."
 
-  Step 3.  Open System Settings (the gear icon in your Dock, or  → System Settings).
+  Step 3.  Open System Settings (the gear icon in your Dock, or
+            > System Settings).
 
   Step 4.  In the sidebar, scroll down and click "Privacy & Security."
 
   Step 5.  Scroll down on the right side until you see this message:
-
              "Arc2Zen was blocked to protect your Mac."
-
            Click the "Open Anyway" button next to it.
 
   Step 6.  macOS asks for your Mac password — enter it.
@@ -27,24 +29,53 @@ Follow these steps EXACTLY:
            of 'Arc2Zen'. Are you sure you want to open it?"
            Click "Open Anyway".
 
-The app launches.
+The app launches. After this you can double-click Arc2Zen.app any time
+without going through the steps again.
 
-After this, you can double-click Arc2Zen.app any time without going
-through these steps again — macOS only blocks the first launch.
 
-----------------------------------------------------------------------
+------ Windows --------------------------------------------------------
 
-Why all these steps?
+BEFORE EXTRACTING the .zip, do this once:
 
-Apple charges $99 per year for the developer certificate that would
-remove this prompt. Arc2Zen is free open-source software and that fee
-isn't worth passing on. The app is ad-hoc codesigned so its contents
-have not been tampered with — verify any time with:
+  Step 1.  Right-click the downloaded Arc2Zen-*.zip in your Downloads
+           folder and choose "Properties."
+
+  Step 2.  At the bottom of the Properties dialog you'll see "Security:
+           This file came from another computer..." with an "Unblock"
+           checkbox. Tick it and click OK.
+
+  (This strips the "Mark of the Web" tag from every file inside the
+  zip in one shot. If you skip this step, every individual .dll inside
+  Arc2Zen will trip SmartScreen separately.)
+
+THEN extract and run:
+
+  Step 3.  Double-click the .zip and drag the Arc2Zen folder to your
+           Desktop (or wherever you want).
+
+  Step 4.  Open the Arc2Zen folder and double-click Arc2Zen.exe.
+
+  Step 5.  Windows shows "Windows protected your PC" with a Don't Run
+           button. Click "More info" (small text under the title).
+
+  Step 6.  A "Run anyway" button appears. Click it.
+
+The app launches. When you're done with the migration, drag the
+Arc2Zen folder to the Recycle Bin. There's nothing to uninstall.
+
+
+------ Why all these steps? ------------------------------------------
+
+Apple and Microsoft both charge developers for certificates that
+remove these prompts. Arc2Zen is free open-source software and those
+fees aren't worth passing on to users.
+
+The macOS bundle is ad-hoc codesigned, so you can verify its contents
+have not been tampered with at any time:
 
   codesign --verify --deep --strict /Volumes/Arc2Zen/Arc2Zen.app
 
-Source code: https://github.com/tarikbc/arc2zen
+Both platforms are reproducible from source: see the build/ scripts
+in the repository.
 
-When you're done with the migration, drag the DMG to the Trash. There
-is nothing else to clean up — Arc2Zen runs from the DMG and doesn't
-install itself anywhere.
+Source code: https://github.com/rafcabezas/arc2zen

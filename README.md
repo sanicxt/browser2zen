@@ -1,7 +1,7 @@
 # Arc → Zen
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20arm64-lightgrey?logo=apple)](https://github.com/rafcabezas/arc2zen/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows%20x64-lightgrey?logo=apple)](https://github.com/rafcabezas/arc2zen/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.7%2B-yellow?logo=python&logoColor=white)](https://www.python.org/)
 [![PyWebView](https://img.shields.io/badge/GUI-PyWebView-5e86ff)](https://pywebview.flowrl.com/)
 [![Latest release](https://img.shields.io/github/v/release/rafcabezas/arc2zen?display_name=tag&label=release)](./releases/latest)
@@ -15,10 +15,14 @@ terminal, no Python, no install steps to follow.
 
 ---
 
-## Install (macOS, Apple Silicon)
+## Install
 
-1. Open the [latest release](./releases/latest) and download
-   `Arc2Zen-x.y.z-arm64.dmg`.
+Open the [latest release](./releases/latest) and pick the artifact
+for your OS.
+
+### macOS (Apple Silicon)
+
+1. Download `Arc2Zen-x.y.z-arm64.dmg`.
 2. Double-click the DMG to mount it, then double-click `Arc2Zen.app`.
 3. macOS will show a dialog ("damaged" or "cannot verify"). Click
    **Done**. Do **not** click "Move to Trash".
@@ -30,20 +34,37 @@ terminal, no Python, no install steps to follow.
 
 The app launches and walks you through detection, preview, and
 migration. Steps 3 to 7 only happen the first time. After that you can
-double-click `Arc2Zen.app` normally.
+double-click `Arc2Zen.app` normally. When you're done, drag the DMG to
+the Trash; Arc2Zen runs from inside the DMG and doesn't install itself
+anywhere.
 
-When you're done, drag the DMG to the Trash. Arc2Zen runs from inside
-the DMG and doesn't install itself anywhere.
+### Windows (x64)
 
-> **Why all the steps?** Apple charges $99/year for the developer
-> certificate that removes this prompt. Arc2Zen is free open-source
-> software and that fee isn't worth passing on. The bundle is ad-hoc
-> codesigned, so you can verify its contents have not been tampered
-> with at any time:
+1. Download `Arc2Zen-x.y.z-win-x64.zip`.
+2. **Before extracting**, right-click the .zip in your Downloads
+   folder and choose **Properties**. Tick the **Unblock** checkbox at
+   the bottom and click OK. (This strips the Mark-of-the-Web tag from
+   every file inside in one shot. If you skip this step, every .dll
+   inside the bundle trips SmartScreen separately.)
+3. Double-click the .zip and drag the `Arc2Zen` folder anywhere.
+4. Open the `Arc2Zen` folder and double-click `Arc2Zen.exe`.
+5. Windows will show *"Windows protected your PC"*. Click **More
+   info**, then **Run anyway**.
+
+The app launches. When you're done, drag the `Arc2Zen` folder to the
+Recycle Bin; nothing else needs to be uninstalled.
+
+> **Why all the steps?** Apple and Microsoft each charge developers
+> for the certificates that remove these prompts. Arc2Zen is free
+> open-source software and those fees aren't worth passing on. The
+> macOS bundle is ad-hoc codesigned, so you can verify its contents
+> have not been tampered with at any time:
 >
 > ```
 > codesign --verify --deep --strict /Volumes/Arc2Zen/Arc2Zen.app
 > ```
+>
+> Both platforms are reproducible from source: see [`build/`](./build).
 
 ### Don't have Zen yet?
 
@@ -65,7 +86,7 @@ your profile, then click **Recheck** in Arc2Zen and continue.
 | **Bookmarks** | Pinned tabs are also mirrored to Firefox bookmarks as a backup. |
 | **Favicons** | Arc's cached icons are inlined so tabs show their icons immediately, with no waiting for refetch. |
 | **History** | Optional. Browsing history with original timestamps is copied over. |
-| **Login state** | Optional, macOS only. Arc cookies are decrypted (one-time Keychain prompt) and re-encrypted into Zen so you stay logged in to Gmail, Twitter, and the rest. |
+| **Login state** | Optional. Arc cookies are decrypted (via macOS Keychain or Windows DPAPI, depending on platform) and re-encrypted into Zen so you stay logged in to Gmail, Twitter, and the rest. |
 
 Every step writes a timestamped backup beside your Zen profile before
 it changes anything, and Arc data is read-only. The Backups screen
@@ -86,7 +107,7 @@ pip install -r requirements.txt
 python3 migrate_arc_to_zen.py --dry-run    # preview only
 python3 migrate_arc_to_zen.py              # actual migration
 
-# GUI (macOS only)
+# GUI (macOS or Windows)
 pip install -r requirements-build.txt
 python -m app
 ```
