@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=760, initial-scale=1" />
+  <title>Arc2Zen</title>
+  <link rel="stylesheet" href="tokens.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body data-screen="welcome">
+
+  <!-- ------------------------------------------------ titlebar -->
+  <div class="titlebar">
+    <div class="tl">
+      <button class="tl-close" id="tl-close" aria-label="Close"></button>
+      <button class="tl-min" id="tl-min" aria-label="Minimize" disabled></button>
+      <button class="tl-max" id="tl-max" aria-label="Maximize" disabled></button>
+    </div>
+    <span class="ver" id="ver">arc2zen · v0.1</span>
+  </div>
+
+  <main>
+    <!-- ============================================ welcome -->
+    <section class="screen" id="screen-welcome">
+      <div class="hero">
+        <div class="brand-pair" id="brand-pair"></div>
+        <p class="eyebrow">Arc → Zen</p>
+        <h1 class="display">Move your browser, keep your setup.</h1>
+        <p class="muted" style="margin-top: var(--space-3); max-width: 520px; line-height: 1.5;">
+          Spaces, pinned tabs, folders, favicons, bookmarks. Optionally history and
+          login state. Done in under a minute.
+        </p>
+      </div>
+      <div class="actions">
+        <button class="btn btn-primary" id="welcome-go">Let's go</button>
+      </div>
+      <div class="footer">
+        <span>arc2zen · open source</span>
+        <button class="link-btn" id="open-backups">Manage backups</button>
+        <span>macOS · arm64</span>
+      </div>
+    </section>
+
+    <!-- ============================================ detect -->
+    <section class="screen" id="screen-detect">
+      <p class="eyebrow">Step 1 of 3</p>
+      <h1 class="h1">Let's find your browsers.</h1>
+      <p class="muted" style="margin-top: 4px;">Both browsers must be quit before we can read and write their data safely.</p>
+
+      <div class="detect-grid">
+        <div class="browser-card" id="card-arc" data-ok="false">
+          <div class="card-head">
+            <span class="brand-mark" id="arc-mark"></span>
+            <span class="h2">Arc</span>
+            <span class="pill pill-warn" id="arc-pill">Detecting…</span>
+          </div>
+          <div class="subtle muted" id="arc-detail">Looking for Arc data on disk.</div>
+          <div id="arc-running-row" style="display:none;">
+            <button class="btn btn-soft btn-pill" id="arc-quit-btn">Quit Arc</button>
+          </div>
+        </div>
+
+        <div class="browser-card" id="card-zen" data-ok="false">
+          <div class="card-head">
+            <span class="brand-mark" id="zen-mark"></span>
+            <span class="h2">Zen</span>
+            <span class="pill pill-warn" id="zen-pill">Detecting…</span>
+          </div>
+          <div class="subtle muted" id="zen-detail">Looking for Zen profiles on disk.</div>
+          <select class="profile-select" id="zen-profile-select" style="display:none;"></select>
+          <div id="zen-install-row" style="display:none;">
+            <button class="btn btn-primary btn-pill" id="zen-install-btn">Download Zen</button>
+            <span class="subtle dim" style="margin-left: var(--space-3);">Then launch it once and click Recheck.</span>
+          </div>
+          <div id="zen-running-row" style="display:none;">
+            <button class="btn btn-soft btn-pill" id="zen-quit-btn">Quit Zen</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="gate" id="detect-gate" style="display:none;">
+        <span id="detect-gate-text"></span>
+        <button class="btn btn-soft btn-pill" id="detect-recheck">Recheck</button>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="detect-back">Back</button>
+        <button class="btn btn-primary" id="detect-next" disabled>Continue</button>
+      </div>
+    </section>
+
+    <!-- ============================================ preview -->
+    <section class="screen" id="screen-preview">
+      <p class="eyebrow">Step 2 of 3</p>
+      <h1 class="h1" id="preview-title">Here's what we found.</h1>
+      <p class="muted" style="margin-top: 4px;">Review and choose what to bring over.</p>
+
+      <div class="stat-strip" id="stat-strip"></div>
+
+      <div class="spaces-list" id="spaces-list"></div>
+
+      <p class="eyebrow" style="margin-top: var(--space-6);">Optional</p>
+      <div class="toggles" id="toggles"></div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="preview-back">Back</button>
+        <button class="btn btn-primary" id="preview-go">Start migration</button>
+      </div>
+    </section>
+
+    <!-- ============================================ progress -->
+    <section class="screen" id="screen-progress">
+      <header class="progress-head">
+        <div>
+          <p class="eyebrow" id="progress-meta">Working</p>
+          <h1 class="display">Migrating</h1>
+          <p class="muted" id="progress-sub" style="margin-top: 4px;">Bringing your Arc setup into Zen.</p>
+        </div>
+        <span class="elapsed" id="elapsed" aria-live="polite">0:00</span>
+      </header>
+
+      <div class="meter" id="meter" aria-hidden="true"></div>
+
+      <ol class="timeline" id="timeline" aria-live="polite"></ol>
+
+      <details class="details">
+        <summary>View log</summary>
+        <div class="log" id="log"></div>
+      </details>
+    </section>
+
+    <!-- ============================================ done -->
+    <section class="screen" id="screen-done">
+      <div class="check">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M5 12 L10 17 L19 7" stroke="var(--success)" stroke-width="2.6"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <h1 class="display">All set.</h1>
+      <p class="summary" id="done-summary">Your Arc setup now lives in Zen.</p>
+      <div class="actions">
+        <button class="btn btn-primary" id="done-launch">Launch Zen</button>
+        <button class="btn btn-ghost" id="done-quit">Quit</button>
+      </div>
+      <div class="backups">
+        <p class="eyebrow">Backups (click to reveal)</p>
+        <ul id="backups-list"></ul>
+      </div>
+    </section>
+
+    <!-- ============================================ backups -->
+    <section class="screen" id="screen-backups">
+      <header class="progress-head">
+        <div>
+          <p class="eyebrow">Backups</p>
+          <h1 class="h1">Restore an earlier state.</h1>
+          <p class="muted" style="margin-top: 4px;">Every migration writes timestamped backups beside your Zen profile. Pick one to restore or delete files you no longer need.</p>
+        </div>
+      </header>
+
+      <div id="backups-empty" class="muted" style="margin-top: var(--space-6); display:none;">No backups found yet.</div>
+      <div id="backups-groups" style="margin-top: var(--space-4);"></div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="backups-back">Back</button>
+        <button class="btn btn-soft" id="backups-refresh">Refresh</button>
+      </div>
+    </section>
+
+    <!-- ============================================ error -->
+    <section class="screen" id="screen-error">
+      <div class="icon">!</div>
+      <h1 class="h1">Migration didn't complete.</h1>
+      <p class="muted" id="error-summary" style="margin-top: 4px;">A step failed. Backups were created before each write so your Zen data is safe.</p>
+      <div class="body" id="error-body"></div>
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="error-quit">Quit</button>
+        <button class="btn btn-soft" id="error-copy">Copy report</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
