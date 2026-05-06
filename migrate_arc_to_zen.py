@@ -27,6 +27,7 @@ from zen_space_importer import ZenSpaceImporter, ZenProfile
 from zen_pinned_tab_importer import ZenPinnedTabImporter
 from zen_workspace_importer import ZenWorkspaceImporter
 from zen_sessions_importer import ZenSessionsImporter
+from zen_favicon_importer import FaviconImporter, _iter_pinned_urls
 
 # Optional: Import sessionstore manager for open tabs (requires lz4)
 try:
@@ -123,6 +124,8 @@ class Arc2ZenMigrator:
         arc_space_name: Optional[str] = None,
         import_open_tabs: bool = False,
         no_containers: bool = False,
+        import_favicons: bool = True,
+        folders_collapsed: bool = True,
     ) -> bool:
         """Run the complete Arc to Zen migration process."""
 
@@ -294,7 +297,7 @@ class Arc2ZenMigrator:
         if uses_sessions:
             # Zen 1.18+: Import spaces, pinned tabs, and folders into zen-sessions.jsonlz4
             print("\n📌 Step 4b: Importing pinned tabs and workspaces (modern format)...")
-            sessions_importer = ZenSessionsImporter(selected_zen_profile)
+            sessions_importer = ZenSessionsImporter(selected_zen_profile, folders_collapsed=folders_collapsed)
             sessions_success = sessions_importer.import_arc_data(arc_export_data, container_mappings, dry_run=dry_run)
             pinned_success = sessions_success
             workspace_success = sessions_success
@@ -313,7 +316,35 @@ class Arc2ZenMigrator:
         print("\n📚 Step 4d: Importing as bookmarks...")
         bookmark_success = zen_importer.import_arc_bookmarks(arc_export_data, dry_run=dry_run)
 
-        # Step 4e: Import open tabs to sessionstore
+        # Step 4e: Copy favicons from Arc to Zen so they show up immediately
+        favicon_success = True
+        favicon_summary = None
+        if import_favicons:
+            print("\n🖼️  Step 4e: Importing favicons from Arc...")
+            try:
+                favicon_importer = FaviconImporter(selected_zen_profile, dry_run=dry_run)
+                urls = list(dict.fromkeys(_iter_pinned_urls(arc_export_data)))
+                db_summary = favicon_importer.import_favicons(urls)
+                session_summary = favicon_importer.inject_session_images(urls)
+                favicon_summary = {'db': db_summary, 'session': session_summary}
+                matched = db_summary.get('matched', 0)
+                requested = db_summary.get('requested', 0)
+                if dry_run:
+                    print(f"🧪 Would import {matched}/{requested} favicons")
+                else:
+                    imported = db_summary.get('imported', 0)
+                    updated = session_summary.get('updated', 0)
+                    print(f"✅ Imported {imported} favicons → favicons.sqlite, "
+                          f"inlined {updated} tabs in zen-sessions.jsonlz4 "
+                          f"(matched {matched}/{requested} URLs)")
+            except Exception as e:
+                print(f"⚠️  Favicon import error: {e}")
+                logger.exception("Favicon import failed")
+                favicon_success = False
+        else:
+            print("\n🖼️  Step 4e: Favicon import skipped (--skip-favicons)")
+
+        # Step 4f: Import open tabs to sessionstore
         print("\n🔄 Step 4f: Importing open tabs...")
         session_success = True
         total_open_tabs = sum(len(space.get('open_tabs', [])) for space in arc_export_data.get('spaces', []))
@@ -341,7 +372,14 @@ class Arc2ZenMigrator:
         else:
             print("ℹ️  No open tabs to import")
 
-        success = space_success and pinned_success and workspace_success and bookmark_success and session_success
+        success = (
+            space_success
+            and pinned_success
+            and workspace_success
+            and bookmark_success
+            and session_success
+            and favicon_success
+        )
 
         # Cleanup
         if self.temp_export_file.exists():
@@ -437,6 +475,18 @@ Examples:
         help='Do not assign any container to tabs (container ID 0 - regular browsing). By default, separate containers are created for each Arc space. You can manually assign containers later in Zen.'
     )
 
+    parser.add_argument(
+        '--skip-favicons',
+        action='store_true',
+        help='Skip importing favicons from Arc. By default, favicons are copied so tabs show their icons immediately.'
+    )
+
+    parser.add_argument(
+        '--folders-open',
+        action='store_true',
+        help='Import folders in expanded state. By default they are collapsed to reduce sidebar clutter after migration.'
+    )
+
     args = parser.parse_args()
 
     if args.verbose:
@@ -452,6 +502,8 @@ Examples:
             arc_space_name=args.arc_space,
             import_open_tabs=args.open_tabs,
             no_containers=args.no_containers,
+            import_favicons=not args.skip_favicons,
+            folders_collapsed=not args.folders_open,
         )
 
         if success and not args.dry_run:

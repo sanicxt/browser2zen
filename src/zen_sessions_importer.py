@@ -57,9 +57,10 @@ def write_mozlz4(file_path: Path, data: dict) -> None:
 class ZenSessionsImporter:
     """Imports Arc spaces, pinned tabs, and folders into zen-sessions.jsonlz4."""
 
-    def __init__(self, zen_profile_path: Path):
+    def __init__(self, zen_profile_path: Path, folders_collapsed: bool = True):
         self.zen_profile = zen_profile_path
         self.sessions_file = zen_profile_path / "zen-sessions.jsonlz4"
+        self.folders_collapsed = folders_collapsed
         self._id_counter = 0
 
     # --- ID generation ---
@@ -108,7 +109,7 @@ class ZenSessionsImporter:
     # --- Build structures ---
 
     def _build_space(self, space_data: dict) -> dict:
-        return {
+        space = {
             "uuid": self._generate_space_uuid(),
             "name": space_data["space_name"],
             "theme": {
@@ -120,6 +121,24 @@ class ZenSessionsImporter:
             "containerTabId": 0,
             "hasCollapsedPinnedTabs": False,
         }
+
+        icon = space_data.get("icon")
+        if icon:
+            space["icon"] = icon
+
+        color = space_data.get("color")
+        if color and all(k in color for k in ("r", "g", "b")):
+            r = int(round(color["r"] * 255))
+            g = int(round(color["g"] * 255))
+            b = int(round(color["b"] * 255))
+            space["theme"]["gradientColors"] = [{
+                "c": [r, g, b],
+                "isCustom": False,
+                "algorithm": "floating",
+                "isPrimary": True,
+            }]
+
+        return space
 
     def _build_tab(self, tab_data: dict, workspace_uuid: str,
                    index: int, folder_id: Optional[str] = None) -> dict:
@@ -164,7 +183,7 @@ class ZenSessionsImporter:
             "splitViewGroup": False,
             "id": self._generate_sync_id(),
             "name": folder_data.get("title", "Untitled"),
-            "collapsed": False,
+            "collapsed": self.folders_collapsed,
             "saveOnWindowClose": True,
             "parentId": parent_folder_id,
             "prevSiblingInfo": None,
