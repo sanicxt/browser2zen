@@ -1,0 +1,50 @@
+Arc2Zen — first launch on macOS
+================================
+
+macOS will block Arc2Zen the very first time you open it because the
+app isn't notarized by Apple. This is a one-time setup you need to do.
+Follow these steps EXACTLY:
+
+  Step 1.  Double-click Arc2Zen.app inside this DMG.
+
+  Step 2.  macOS shows a dialog: "'Arc2Zen' is damaged and can't be
+           opened" or "Apple cannot check it for malicious software."
+           Click "Done" (or "Cancel"). DO NOT click "Move to Trash."
+
+  Step 3.  Open System Settings (the gear icon in your Dock, or  → System Settings).
+
+  Step 4.  In the sidebar, scroll down and click "Privacy & Security."
+
+  Step 5.  Scroll down on the right side until you see this message:
+
+             "Arc2Zen was blocked to protect your Mac."
+
+           Click the "Open Anyway" button next to it.
+
+  Step 6.  macOS asks for your Mac password — enter it.
+
+  Step 7.  Another dialog appears: "macOS cannot verify the developer
+           of 'Arc2Zen'. Are you sure you want to open it?"
+           Click "Open Anyway".
+
+The app launches.
+
+After this, you can double-click Arc2Zen.app any time without going
+through these steps again — macOS only blocks the first launch.
+
+----------------------------------------------------------------------
+
+Why all these steps?
+
+Apple charges $99 per year for the developer certificate that would
+remove this prompt. Arc2Zen is free open-source software and that fee
+isn't worth passing on. The app is ad-hoc codesigned so its contents
+have not been tampered with — verify any time with:
+
+  codesign --verify --deep --strict /Volumes/Arc2Zen/Arc2Zen.app
+
+Source code: https://github.com/tarikbc/arc2zen
+
+When you're done with the migration, drag the DMG to the Trash. There
+is nothing else to clean up — Arc2Zen runs from the DMG and doesn't
+install itself anywhere.

@@ -1,0 +1,5 @@
+# Build-time deps for the GUI bundle. Not needed at runtime once installed.
+pywebview>=6.0
+pyinstaller>=6.0
+pyobjc-framework-WebKit
+pyobjc-framework-Cocoa

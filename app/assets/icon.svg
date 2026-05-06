@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <!-- Outer macOS-style rounded-square card with subtle gradient -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1A1B22"/>
+      <stop offset="100%" stop-color="#0E0F14"/>
+    </linearGradient>
+    <!-- Arc badge (cream) -->
+    <linearGradient id="arcBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#FFF7F2"/>
+      <stop offset="60%" stop-color="#FFE9F0"/>
+      <stop offset="100%" stop-color="#FFD8E5"/>
+    </linearGradient>
+    <!-- Zen badge (gunmetal) -->
+    <linearGradient id="zenBg" x1="0" y1="0" x2="0.7" y2="1">
+      <stop offset="0%" stop-color="#2B2B2F"/>
+      <stop offset="70%" stop-color="#15151A"/>
+      <stop offset="100%" stop-color="#0B0B0E"/>
+    </linearGradient>
+    <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- App background (rounded square, ~22% radius is the macOS standard) -->
+  <rect x="0" y="0" width="1024" height="1024" rx="225" ry="225" fill="url(#bg)"/>
+
+  <!-- Arc badge (left) -->
+  <g transform="translate(120 320)" filter="url(#cardShadow)">
+    <rect width="320" height="320" rx="68" ry="68" fill="url(#arcBg)"/>
+    <!-- The Arc Browser logo paths, viewBox 0 0 82 68, scaled and centred. -->
+    <g transform="translate(50 60) scale(2.7)" fill-rule="evenodd" clip-rule="evenodd">
+      <path fill="#1a007f" d="m28.8 51.97 6.35-13.36c-4.85-1.03-9.73-4.03-12.49-7.68l-6.64 13.96c3.69 3.13 8.12 5.59 12.78 7.08"/>
+      <path fill="#4e000a" d="M55.3 30.53c-3.19 3.91-7.62 6.81-12.36 7.94l6.33 13.32c4.62-1.56 8.94-4.08 12.67-7.31L55.3 30.53z"/>
+      <path fill="#1a007f" d="m16.02 44.89-3.32 6.98c-1.69 3.55-.42 7.92 3.06 9.77 3.69 1.96 8.23.43 10.01-3.3l3.03-6.37a37.885 37.885 0 0 1-12.78-7.08"/>
+      <path fill="#ff9396" d="M68.48 15.29a7.29 7.29 0 0 0-8.58 5.72c-.7 3.5-2.34 6.76-4.6 9.53l6.63 13.96c6.12-5.31 10.64-12.54 12.26-20.63.79-3.96-1.77-7.8-5.71-8.58"/>
+      <path fill="#002dc8" d="M42.94 38.47c-1.42.34-2.87.52-4.32.52-1.13 0-2.3-.13-3.47-.38-4.85-1.03-9.73-4.03-12.49-7.68-.69-.91-1.25-1.86-1.64-2.83-1.51-3.73-5.76-5.53-9.49-4.03C7.8 25.58 6 29.83 7.5 33.56c1.71 4.24 4.73 8.13 8.52 11.33a37.84 37.84 0 0 0 12.77 7.08c3.21 1.03 6.54 1.6 9.82 1.6 3.64 0 7.23-.63 10.65-1.78l-6.32-13.32z"/>
+      <path fill="#ff536a" d="m65.43 51.84-3.5-7.36-6.63-13.95-.01.01s0-.01.01-.01l-9.64-20.28a7.292 7.292 0 0 0-6.58-4.16c-2.81 0-5.37 1.62-6.58 4.16l-9.83 20.68c2.76 3.65 7.64 6.65 12.49 7.68l3.18-6.68c.3-.63 1.2-.63 1.5 0l3.11 6.54h.02-.02l6.33 13.32 3.11 6.54a7.28 7.28 0 0 0 6.59 4.16c.65 0 1.3-.09 1.94-.27 4.39-1.21 6.47-6.26 4.51-10.38"/>
+    </g>
+  </g>
+
+  <!-- Arrow between badges -->
+  <g transform="translate(512 480)" stroke="#FFFFFF" stroke-width="14" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.65">
+    <line x1="-30" y1="0" x2="30" y2="0"/>
+    <polyline points="10,-22 32,0 10,22"/>
+  </g>
+
+  <!-- Zen badge (right) -->
+  <g transform="translate(584 320)" filter="url(#cardShadow)">
+    <rect width="320" height="320" rx="68" ry="68" fill="url(#zenBg)"/>
+    <!-- Three concentric rings, hollow centre -->
+    <g transform="translate(160 160)" stroke="#F2F2F4" stroke-width="11" fill="none">
+      <circle r="118"/>
+      <circle r="78"/>
+      <circle r="38"/>
+    </g>
+  </g>
+</svg>
