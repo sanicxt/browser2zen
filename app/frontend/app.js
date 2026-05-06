@@ -621,7 +621,6 @@ function handleEvent(ev) {
 
 function visibleSteps() {
   return state.steps.filter(s => {
-    if (s === "open_tabs") return state.options.includeOpenTabs;
     if (s === "history")   return state.options.includeHistory;
     if (s === "cookies")   return state.options.includeCookies;
     if (s === "containers" || s === "sessions") return state.options.includeWorkspaces || state.options.includePinnedTabs;
@@ -695,7 +694,14 @@ function stepSummaryText(step, s) {
   }
   if (step === "history") return `${formatRows(s.places_added ?? 0)} places · ${formatRows(s.visits_added ?? 0)} visits`;
   if (step === "cookies") return `${formatRows(s.imported ?? 0)} imported · ${formatRows(s.merged ?? 0)} merged`;
-  if (step === "bookmarks" || step === "sessions" || step === "open_tabs") return s.ok ? "ok" : "";
+  if (step === "sessions") {
+    if (s.pinned == null && s.open == null) return s.ok ? "ok" : "";
+    const parts = [];
+    if (s.pinned) parts.push(`${formatRows(s.pinned)} pinned`);
+    if (s.open)   parts.push(`${formatRows(s.open)} open`);
+    return parts.join(" · ") || (s.ok ? "ok" : "");
+  }
+  if (step === "bookmarks") return s.ok ? "ok" : "";
   return "";
 }
 

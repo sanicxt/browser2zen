@@ -176,6 +176,40 @@ class ZenSessionsImporter:
 
         return tab
 
+    def _build_open_tab(self, tab_data: dict, workspace_uuid: str,
+                         user_context_id: int, index: int) -> dict:
+        """Build a non-pinned open-tab entry that lives in zen-sessions.jsonlz4.
+
+        Open tabs in modern Zen are restored from this file, NOT from
+        sessionstore.jsonlz4 (Zen's #restoreWindowData() overwrites
+        sessionstore on every launch). The schema mirrors a native Zen
+        open tab: ``entries`` carrying the URL/title, ``zenWorkspace``
+        binding the tab to the right workspace, and ``userContextId``
+        scoping cookies to the per-space container.
+        """
+        url = tab_data.get("url", "")
+        title = tab_data.get("title", "")
+        timestamp_ms = int(time.time() * 1000)
+
+        return {
+            "entries": [{"url": url, "title": title}],
+            "lastAccessed": timestamp_ms,
+            "pinned": False,
+            "hidden": False,
+            "zenWorkspace": workspace_uuid,
+            "zenSyncId": self._generate_sync_id(),
+            "zenEssential": False,
+            "zenDefaultUserContextId": None,
+            "zenIsEmpty": False,
+            "zenHasStaticIcon": False,
+            "zenGlanceId": None,
+            "zenIsGlance": False,
+            "searchMode": None,
+            "userContextId": user_context_id,
+            "attributes": {},
+            "index": index,
+        }
+
     def _build_folder(self, folder_data: dict, workspace_uuid: str,
                       parent_folder_id: Optional[str] = None) -> dict:
         return {
@@ -194,10 +228,15 @@ class ZenSessionsImporter:
 
     # --- Core import logic ---
 
-    def _process_space(self, space_data: dict) -> Tuple[dict, List[dict], List[dict]]:
-        """Process a single Arc space into Zen space, folders, and tabs.
+    def _process_space(self, space_data: dict,
+                       user_context_id: int = 0) -> Tuple[dict, List[dict], List[dict]]:
+        """Process a single Arc space into Zen space, folders, and tabs
+        (pinned + open).
 
-        Returns (space_dict, folders_list, tabs_list).
+        ``user_context_id`` scopes the open tabs' cookies to the per-space
+        container; pinned tabs are bound through the workspace's
+        ``containerTabId`` instead. Returns (space_dict, folders_list,
+        tabs_list).
         """
         space = self._build_space(space_data)
         workspace_uuid = space["uuid"]
@@ -261,6 +300,21 @@ class ZenSessionsImporter:
                 index=i + 1, folder_id=folder_id,
             )
             zen_tabs.append(zen_tab)
+
+        # Open (non-pinned) tabs from Arc become open tabs in the Zen
+        # workspace. They live in the same ``tabs`` array as pinned tabs;
+        # Zen distinguishes them via the ``pinned`` flag.
+        open_tabs = space_data.get("open_tabs", []) or []
+        base_index = len(zen_tabs)
+        for j, tab_data in enumerate(open_tabs):
+            url = tab_data.get("url", "")
+            if not url:
+                continue
+            zen_tabs.append(self._build_open_tab(
+                tab_data, workspace_uuid,
+                user_context_id=user_context_id,
+                index=base_index + j + 1,
+            ))
 
         # Create about:blank placeholder tab per folder - Zen requires this for validation
         timestamp_ms = int(time.time() * 1000)
@@ -426,15 +480,21 @@ class ZenSessionsImporter:
 
             for space_data in arc_export_data.get("spaces", []):
                 space_name = space_data["space_name"]
+                container_id = int(container_mappings.get(space_name, 0) or 0)
 
-                space, folders, tabs = self._process_space(space_data)
+                space, folders, tabs = self._process_space(
+                    space_data, user_context_id=container_id,
+                )
                 all_new_spaces.append(space)
                 all_new_folders.extend(folders)
                 all_new_tabs.extend(tabs)
 
+                pinned_n = sum(1 for t in tabs if t.get("pinned"))
+                open_n = sum(1 for t in tabs if not t.get("pinned"))
                 logger.info(
-                    f"  {space_name}: {len(tabs)} pinned tabs, "
-                    f"{len(folders)} folders -> workspace {space['uuid']}"
+                    f"  {space_name}: {pinned_n} pinned tabs, "
+                    f"{open_n} open tabs, {len(folders)} folders "
+                    f"-> workspace {space['uuid']}"
                 )
 
             if dry_run:

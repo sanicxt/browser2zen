@@ -93,22 +93,20 @@ GUI_STEPS = (
     "sessions",
     "bookmarks",
     "favicons",
-    "open_tabs",
     "history",
     "cookies",
     "finalize",
 )
 
 STEP_LABELS = {
-    "extract":   "Reading Arc data",
+    "extract":    "Reading Arc data",
     "containers": "Creating containers",
-    "sessions":  "Importing spaces, pinned tabs and folders",
-    "bookmarks": "Backing up as bookmarks",
-    "favicons":  "Importing favicons",
-    "open_tabs": "Importing open tabs",
-    "history":   "Importing browsing history",
-    "cookies":   "Importing cookies",
-    "finalize":  "Finalizing",
+    "sessions":   "Importing spaces, pinned tabs, open tabs and folders",
+    "bookmarks":  "Backing up as bookmarks",
+    "favicons":   "Importing favicons",
+    "history":    "Importing browsing history",
+    "cookies":    "Importing cookies",
+    "finalize":   "Finalizing",
 }
 
 
@@ -345,9 +343,29 @@ class MigrationOrchestrator:
         if opts.include_pinned_tabs or opts.include_workspaces:
             self._start_step("sessions")
             try:
+                # ``include_open_tabs`` controls whether Arc's currently-open
+                # (non-pinned) tabs come along too. They go into the same
+                # zen-sessions.jsonlz4 the pinned tabs do — modern Zen reads
+                # both from there, regardless of pinned/unpinned status.
+                # Filter them out of the data fed to the importer when the
+                # toggle is off so we don't have to plumb a flag through.
+                payload = arc_export_data
+                if not opts.include_open_tabs:
+                    payload = dict(arc_export_data)
+                    payload["spaces"] = [
+                        {**sp, "open_tabs": []}
+                        for sp in arc_export_data.get("spaces", [])
+                    ]
+
                 sess = ZenSessionsImporter(zen_profile, folders_collapsed=opts.folders_collapsed)
-                ok = sess.import_arc_data(arc_export_data, container_mappings, dry_run=False)
-                self._done_step("sessions", summary={"ok": bool(ok)})
+                ok = sess.import_arc_data(payload, container_mappings, dry_run=False)
+                pinned_total = sum(len(sp.get("pinned_tabs") or [])
+                                   for sp in payload.get("spaces", []))
+                open_total = sum(len(sp.get("open_tabs") or [])
+                                 for sp in payload.get("spaces", []))
+                self._done_step("sessions", summary={
+                    "ok": bool(ok), "pinned": pinned_total, "open": open_total,
+                })
             except Exception as exc:
                 self._error_step("sessions", exc)
             yield from self._drain_yield()
@@ -378,17 +396,12 @@ class MigrationOrchestrator:
                 self._error_step("favicons", exc)
             yield from self._drain_yield()
 
-        # 6: open tabs (sessionstore) -----------------------------------
-        if opts.include_open_tabs:
-            self._start_step("open_tabs")
-            try:
-                from zen_sessionstore_manager import ZenSessionstoreManager
-                ss = ZenSessionstoreManager(zen_profile)
-                ok = ss.create_workspaces_with_tabs(arc_export_data, container_mappings, dry_run=False)
-                self._done_step("open_tabs", summary={"ok": bool(ok)})
-            except Exception as exc:
-                self._error_step("open_tabs", exc)
-            yield from self._drain_yield()
+        # Open tabs are now part of the "sessions" step above (they go
+        # into zen-sessions.jsonlz4 alongside pinned tabs, which is where
+        # modern Zen actually reads them from). The legacy
+        # ZenSessionstoreManager that used to write to sessionstore.jsonlz4
+        # was a no-op because Zen's #restoreWindowData() overwrites the
+        # sessionstore from zen-sessions on every launch.
 
         # 7: history -----------------------------------------------------
         if opts.include_history:
