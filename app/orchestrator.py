@@ -399,9 +399,19 @@ class MigrationOrchestrator:
                 if summary.get("error"):
                     err = summary["error"]
                     msg = {
-                        "keychain_denied":      "macOS Keychain access was denied; cookies skipped.",
-                        "unsupported_platform": "Cookie import is macOS-only.",
-                        "cookies_db_missing":   "Zen cookies.sqlite was not found.",
+                        # macOS
+                        "keychain_denied":           "macOS Keychain access was denied; cookies skipped.",
+                        # Windows
+                        "arc_local_state_missing":   "Arc has not been launched on this Windows account yet; cookies skipped.",
+                        "arc_no_encrypted_key":      "Arc has no cookie encryption key on this account; cookies skipped.",
+                        "arc_appbound_encryption":   "Arc cookies use newer (v20) app-bound encryption; cookies skipped. Sign in fresh on imported sites.",
+                        "arc_unknown_key_prefix":    "Arc Local State key has an unrecognised prefix; cookies skipped.",
+                        "arc_unexpected_key_length": "Arc DPAPI key has unexpected length; cookies skipped.",
+                        "dpapi_wrong_user":          "Cookies were encrypted on a different Windows account and can't be migrated. Sign in fresh on imported sites.",
+                        "dpapi_failed":              "Windows DPAPI rejected the cookie key; cookies skipped.",
+                        # Both
+                        "unsupported_platform":      "Cookie import only supports macOS and Windows.",
+                        "cookies_db_missing":        "Zen cookies.sqlite was not found.",
                     }.get(err, f"Cookie import failed: {err}")
                     self._error_step("cookies", RuntimeError(msg))
                 else:

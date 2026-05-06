@@ -2,18 +2,31 @@
 """
 Arc → Zen Cookies Importer
 
-Decrypts Arc's Chromium-format cookies (AES-128-CBC, key derived from the
-macOS Keychain "Arc Safe Storage" entry) and writes them into Zen's
+Decrypts Arc's Chromium-format cookies and writes them into Zen's
 Firefox-format `cookies.sqlite` so login sessions carry over.
 
-macOS only. Reading the Keychain may trigger an "always allow / allow"
-prompt the first time. The script is idempotent: re-running merges new
-cookies without duplicating existing ones.
+Supports macOS and Windows:
+
+- **macOS**: master key fetched from the Keychain entry "Arc Safe Storage",
+  derived via PBKDF2 (1003 iterations, salt "saltysalt") to a 16-byte
+  AES-128 key. Cookie blobs prefixed `v10` use AES-128-CBC with an
+  all-spaces IV and PKCS7 padding.
+- **Windows**: master key read from `Local State` JSON, base64-decoded,
+  unwrapped via Windows DPAPI (`crypt32!CryptUnprotectData` through
+  ctypes). Cookie blobs prefixed `v10` use AES-256-GCM (12-byte nonce
+  + ciphertext + 16-byte authentication tag).
+
+The Firefox-side write (`moz_cookies` insert, container duplication,
+ms-vs-seconds expiry handling) is identical across platforms. Re-running
+merges new cookies without duplicating existing ones.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
+import os
 import shutil
 import sqlite3
 import subprocess
@@ -21,7 +34,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +75,7 @@ def _read_keychain_password(service: str = "Arc Safe Storage", account: str = "A
     return None
 
 
-def _derive_aes_key(password: str) -> bytes:
+def _derive_aes_key_macos(password: str) -> bytes:
     """Chromium on macOS: PBKDF2-HMAC-SHA1, salt='saltysalt', iterations=1003, keylen=16."""
     from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     from cryptography.hazmat.primitives import hashes
@@ -76,8 +89,8 @@ def _derive_aes_key(password: str) -> bytes:
     return kdf.derive(password.encode("utf-8"))
 
 
-def _decrypt_v10(blob: bytes, key: bytes) -> Optional[bytes]:
-    """Strip 'v10' magic, AES-128-CBC decrypt with all-spaces IV, strip PKCS7 padding."""
+def _decrypt_v10_cbc(blob: bytes, key: bytes) -> Optional[bytes]:
+    """macOS path. Strip 'v10' magic, AES-128-CBC decrypt with all-spaces IV, PKCS7 unpad."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
     if not blob.startswith(b"v10"):
@@ -92,8 +105,138 @@ def _decrypt_v10(blob: bytes, key: bytes) -> Optional[bytes]:
     pad = padded[-1] if padded else 0
     if 0 < pad <= 16 and padded.endswith(bytes([pad]) * pad):
         padded = padded[:-pad]
-    # Newer Chromium versions prepend a 32-byte SHA-256 of the host as integrity tag.
     return padded
+
+
+# ---------- Windows DPAPI master-key unwrap ----------
+
+class _DpapiError(RuntimeError):
+    """Raised when Windows DPAPI rejects the encrypted blob.
+
+    The ``code`` attribute carries an orchestrator-friendly error key.
+    """
+
+    def __init__(self, code: str, message: str = ""):
+        super().__init__(message or code)
+        self.code = code
+
+
+def _arc_local_state_paths() -> list[Path]:
+    """Return Local State JSON candidates across both Windows install vectors."""
+    home = Path.home()
+    if os.name != "nt":
+        return []
+    candidates = [
+        home / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
+             / "LocalCache/Local/Arc/User Data/Local State",
+        home / "AppData/Local/Arc/User Data/Local State",
+    ]
+    return [p for p in candidates if p.is_file()]
+
+
+def _crypt_unprotect_data(blob: bytes) -> bytes:
+    """Call ``crypt32!CryptUnprotectData`` via ctypes and return the plaintext.
+
+    Raises ``_DpapiError`` with a structured code on failure.
+    """
+    import ctypes
+    from ctypes import wintypes  # type: ignore[import-not-found]
+
+    class DATA_BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    crypt32 = ctypes.WinDLL("crypt32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    crypt32.CryptUnprotectData.argtypes = [
+        ctypes.POINTER(DATA_BLOB), ctypes.c_void_p, ctypes.POINTER(DATA_BLOB),
+        ctypes.c_void_p, ctypes.c_void_p, wintypes.DWORD, ctypes.POINTER(DATA_BLOB),
+    ]
+    crypt32.CryptUnprotectData.restype = wintypes.BOOL
+
+    buf = ctypes.create_string_buffer(blob, len(blob))
+    in_blob = DATA_BLOB(len(blob), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)))
+    out_blob = DATA_BLOB()
+    CRYPTPROTECT_UI_FORBIDDEN = 0x1
+
+    ok = crypt32.CryptUnprotectData(
+        ctypes.byref(in_blob), None, None, None, None,
+        CRYPTPROTECT_UI_FORBIDDEN, ctypes.byref(out_blob),
+    )
+    if not ok:
+        err = ctypes.get_last_error()
+        # ERROR_INVALID_DATA (13) is the canonical "different user" symptom.
+        code = "dpapi_wrong_user" if err == 13 else "dpapi_failed"
+        raise _DpapiError(code, f"CryptUnprotectData failed (GetLastError={err})")
+
+    try:
+        size = int(out_blob.cbData)
+        plaintext = ctypes.string_at(out_blob.pbData, size)
+        return plaintext
+    finally:
+        # Free the allocation Windows made for us.
+        kernel32.LocalFree(out_blob.pbData)
+
+
+def _read_local_state_key_windows() -> bytes:
+    """Read Arc's ``Local State`` and unwrap the master key.
+
+    Raises ``_DpapiError`` with a structured code on any failure path.
+    """
+    paths = _arc_local_state_paths()
+    if not paths:
+        raise _DpapiError(
+            "arc_local_state_missing",
+            "Arc has not been launched on this Windows account yet.",
+        )
+    state = json.loads(paths[0].read_text(encoding="utf-8"))
+    encrypted_b64 = state.get("os_crypt", {}).get("encrypted_key")
+    if not encrypted_b64:
+        raise _DpapiError(
+            "arc_no_encrypted_key",
+            "Arc Local State has no os_crypt.encrypted_key entry.",
+        )
+
+    raw = base64.b64decode(encrypted_b64)
+    if raw.startswith(b"APPB"):
+        # Chromium v20 / Brave / Edge app-bound encryption; not defeatable
+        # without invoking Chromium's elevated COM service.
+        raise _DpapiError(
+            "arc_appbound_encryption",
+            "Arc cookies use app-bound (v20) encryption.",
+        )
+    if not raw.startswith(b"DPAPI"):
+        raise _DpapiError(
+            "arc_unknown_key_prefix",
+            f"Unexpected key prefix {raw[:5]!r}",
+        )
+
+    key = _crypt_unprotect_data(raw[5:])
+    if len(key) != 32:
+        raise _DpapiError(
+            "arc_unexpected_key_length",
+            f"Got {len(key)}-byte key from DPAPI; expected 32 bytes.",
+        )
+    return key
+
+
+def _decrypt_v10_gcm(blob: bytes, key: bytes) -> Optional[bytes]:
+    """Windows path. Strip 'v10' magic, AES-256-GCM decrypt with the embedded nonce.
+
+    Layout: ``b"v10" + nonce[12] + ciphertext + tag[16]``.
+    Returns the plaintext or ``None`` on prefix/format mismatch. The
+    caller swallows individual decrypt failures and counts them.
+    """
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.exceptions import InvalidTag
+
+    if not blob.startswith(b"v10") or len(blob) < 3 + 12 + 16:
+        return None
+    nonce = blob[3:15]
+    ct_and_tag = blob[15:]
+    try:
+        return AESGCM(key).decrypt(nonce, ct_and_tag, None)
+    except InvalidTag:
+        return None
 
 
 def _strip_host_hash(plaintext: bytes) -> bytes:
@@ -118,9 +261,34 @@ _SAMESITE_MAP = {-1: 3, 0: 0, 1: 1, 2: 2}
 
 
 def _arc_cookie_dbs() -> list[Path]:
+    """Locate every Arc profile's Cookies SQLite across both supported OSes.
+
+    Newer Chromium builds nest the file as ``<profile>/Network/Cookies``;
+    older builds keep it at ``<profile>/Cookies``. We accept either.
+    """
     home = Path.home()
-    macos = home / "Library/Application Support/Arc/User Data"
-    return sorted(p for p in macos.glob("*/Cookies") if p.is_file()) if macos.exists() else []
+    roots: list[Path] = []
+    if sys.platform == "darwin":
+        roots.append(home / "Library/Application Support/Arc/User Data")
+    elif os.name == "nt":
+        roots.append(
+            home / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
+                 / "LocalCache/Local/Arc/User Data"
+        )
+        roots.append(home / "AppData/Local/Arc/User Data")
+
+    found: list[Path] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for profile in sorted(root.iterdir()):
+            if not profile.is_dir():
+                continue
+            for candidate in (profile / "Network" / "Cookies", profile / "Cookies"):
+                if candidate.is_file():
+                    found.append(candidate)
+                    break
+    return found
 
 
 class CookiesImporter:
@@ -157,7 +325,12 @@ class CookiesImporter:
             shutil.rmtree(self._tempdir, ignore_errors=True)
             self._tempdir = None
 
-    def _decrypt_rows(self, rows: Iterable[sqlite3.Row], key: bytes) -> Iterable[dict]:
+    def _decrypt_rows(
+        self,
+        rows: Iterable[sqlite3.Row],
+        key: bytes,
+        decrypt_fn: Callable[[bytes, bytes], Optional[bytes]],
+    ) -> Iterable[dict]:
         decrypt_fail = 0
         decoded = 0
 
@@ -176,7 +349,7 @@ class CookiesImporter:
             value = s(raw_value)
             blob = row["encrypted_value"]
             if not value and blob:
-                pt = _decrypt_v10(bytes(blob), key)
+                pt = decrypt_fn(bytes(blob), key)
                 if pt is None:
                     decrypt_fail += 1
                     continue
@@ -213,24 +386,39 @@ class CookiesImporter:
         if decoded:
             logger.info(f"🔓 Decrypted {decoded} encrypted cookie values")
 
+    def _resolve_key_and_decrypt_fn(self) -> Tuple[bytes, Callable[[bytes, bytes], Optional[bytes]], Optional[str]]:
+        """Return ``(key, decrypt_fn, None)`` on success or ``(b"", noop, error_code)``.
+
+        Hides macOS Keychain vs Windows DPAPI behind a single dispatch.
+        """
+        if sys.platform == "darwin":
+            password = _read_keychain_password()
+            if password is None:
+                return b"", _decrypt_v10_cbc, "keychain_denied"
+            return _derive_aes_key_macos(password), _decrypt_v10_cbc, None
+
+        if os.name == "nt":
+            try:
+                key = _read_local_state_key_windows()
+            except _DpapiError as exc:
+                logger.error(f"DPAPI key unwrap failed: {exc} ({exc.code})")
+                return b"", _decrypt_v10_gcm, exc.code
+            return key, _decrypt_v10_gcm, None
+
+        return b"", _decrypt_v10_cbc, "unsupported_platform"
+
     def import_cookies(self) -> dict:
         result = {"read": 0, "imported": 0, "merged": 0, "skipped": 0}
-
-        if sys.platform != "darwin":
-            logger.error("Cookie import currently supports macOS only")
-            result["error"] = "unsupported_platform"
-            return result
 
         if not self.zen_cookies.exists():
             logger.error(f"Zen cookies.sqlite not found at {self.zen_cookies}")
             result["error"] = "cookies_db_missing"
             return result
 
-        password = _read_keychain_password()
-        if password is None:
-            result["error"] = "keychain_denied"
+        key, decrypt_fn, err = self._resolve_key_and_decrypt_fn()
+        if err:
+            result["error"] = err
             return result
-        key = _derive_aes_key(password)
 
         cookies: list[dict] = []
         try:
@@ -254,7 +442,7 @@ class CookiesImporter:
                     )
                     rows = cur.fetchall()
                     result["read"] += len(rows)
-                    cookies.extend(self._decrypt_rows(rows, key))
+                    cookies.extend(self._decrypt_rows(rows, key, decrypt_fn))
                 finally:
                     conn.close()
         finally:
