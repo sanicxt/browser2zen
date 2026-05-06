@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version tag for the release artifact (e.g. 1.0.0)"
+        required: true
+        default: "0.0.0"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14            # arm64 runner
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: ver
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="$DISPATCH_VERSION"
+          else
+            VERSION="${REF_NAME#v}"
+          fi
+          # Reject anything that isn't dotted-numeric-with-optional-suffix.
+          if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][A-Za-z0-9]+)*$ ]]; then
+            echo "::error::Refusing version '$VERSION' (must be like 1.2.3 or 1.2.3-rc1)"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Render app icon
+        run: bash build/make_iconset.sh
+
+      - name: Build .app
+        run: bash build/make_app.sh
+
+      - name: Smoke-test the bundle
+        # Launch the app, give WKWebView ~5 seconds to render, then quit.
+        # If the .app crashes on launch (e.g. WebKit framework missing) the
+        # process exits before our timer fires and the build fails.
+        run: |
+          set -e
+          dist/Arc2Zen.app/Contents/MacOS/Arc2Zen &
+          PID=$!
+          sleep 5
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "::error::Bundle exited prematurely on launch"
+            exit 1
+          fi
+          osascript -e 'tell application "Arc2Zen" to quit' || kill $PID
+          wait $PID 2>/dev/null || true
+
+      - name: Build .dmg
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: bash build/make_dmg.sh
+
+      - name: Upload DMG artifact (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arc2Zen-${{ steps.ver.outputs.version }}-arm64
+          path: dist/Arc2Zen-*.dmg
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Arc2Zen ${{ steps.ver.outputs.version }}
+          body: |
+            Arc2Zen ${{ steps.ver.outputs.version }} — macOS arm64.
+
+            ## First launch (one-time setup)
+
+            macOS will block the app the first time because Arc2Zen isn't
+            notarized. To allow it:
+
+            1. Double-click `Arc2Zen.app` — macOS shows a "damaged" or
+               "cannot verify" dialog. Click **Done**.
+            2. Open **System Settings → Privacy & Security**.
+            3. Scroll down and click **Open Anyway** next to the message
+               about Arc2Zen.
+            4. Enter your Mac password if prompted.
+            5. Click **Open Anyway** in the final confirmation dialog.
+
+            macOS only asks once — after that the app opens normally.
+
+            Full instructions are also inside the DMG as `INSTRUCTIONS.txt`.
+          files: |
+            dist/Arc2Zen-*.dmg
+            build/INSTRUCTIONS.txt
+          fail_on_unmatched_files: true
