@@ -21,6 +21,16 @@ python3 migrate_arc_to_zen.py --dry-run
 python3 migrate_arc_to_zen.py --verbose
 ```
 
+### GUI App
+
+```bash
+# Launch the PyWebView GUI (macOS)
+python -m app
+
+# Dev mode (opens WebKit DevTools)
+python -m app --debug
+```
+
 ### Component Testing
 
 ```bash
@@ -63,6 +73,33 @@ python3 src/zen_workspace_mapper.py
 - `zen_space_importer.py` - Manages containers in `containers.json`
 - `zen_bookmark_importer.py` - Backup import as Firefox bookmarks
 - `zen_sessionstore_manager.py` - Manages `zen-sessions.jsonlz4` for open tabs
+- `zen_sessions_importer.py` - Modern Zen 1.18+ session writes
+- `zen_favicon_importer.py` - Arc favicons → Zen `favicons.sqlite` plus inline session image
+- `arc_history_importer.py` - Arc browsing history → Zen `places.sqlite`
+- `arc_cookies_importer.py` - Arc cookies (decrypted via macOS Keychain) → Zen `cookies.sqlite`
+
+**GUI App (`app/`)**
+
+The `app/` directory wraps the importer classes with a PyWebView-based
+single-window GUI. Architecture:
+
+- `app/orchestrator.py` — `MigrationOrchestrator` facade. Calls the
+  importer classes in `src/` in sequence and emits structured
+  `ProgressEvent` dicts through a `ProgressBus`.
+- `app/progress_bus.py` — `logging.Handler` subclass that pushes log
+  records onto a queue the JS frontend polls every 120 ms. Lets the
+  importers stay unchanged while the GUI gets streaming progress.
+- `app/env_check.py` — Arc/Zen detection, profile listing,
+  browser-running check.
+- `app/browser_control.py` — AppleScript-based `quit_browser()` and
+  `launch_zen()`.
+- `app/bridge.py` — JS bridge methods reachable as
+  `window.pywebview.api.<method>`. Includes backup management
+  (`list_backups`, `restore_backup`, `delete_backup`).
+- `app/window.py` — PyWebView frameless-with-vibrancy window setup,
+  `easy_drag=True` for native window dragging.
+- `app/frontend/` — vanilla HTML + CSS + JS (no build step). Uses
+  `createElement` exclusively (no `innerHTML` with user data).
 
 ### Data Flow
 

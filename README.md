@@ -2,6 +2,25 @@
 
 A complete Python-based migration tool that converts Arc browser spaces, pinned tabs, and open tabs into Zen browser workspaces with proper tab assignment.
 
+## 🖥️ GUI app (macOS)
+
+A polished single-window app wraps the migration tool. Welcome screen,
+browser detection with one-click quit, preview of what will be migrated,
+live progress with per-step detail, success/error screens, and a backup
+manager for restoring or deleting backup files.
+
+```bash
+# From the repo root
+pip install -r requirements.txt pywebview
+python -m app
+```
+
+The same code path that powers the CLI is used by the GUI: the
+`MigrationOrchestrator` facade in `app/orchestrator.py` wraps the importer
+classes in `src/` without modifying them, and structured progress events
+are pushed through a `logging.Handler` that the JS frontend polls. See
+`app/` for the source.
+
 ## 🚀 Quick Start
 
 ### Prerequisites
