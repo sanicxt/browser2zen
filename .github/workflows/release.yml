@@ -15,14 +15,11 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    runs-on: macos-14            # arm64 runner
-    timeout-minutes: 25
-
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Resolve version
         id: ver
         env:
@@ -35,12 +32,19 @@ jobs:
           else
             VERSION="${REF_NAME#v}"
           fi
-          # Reject anything that isn't dotted-numeric-with-optional-suffix.
           if ! [[ "$VERSION" =~ ^[0-9]+(\.[0-9]+)*([.-][A-Za-z0-9]+)*$ ]]; then
             echo "::error::Refusing version '$VERSION' (must be like 1.2.3 or 1.2.3-rc1)"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  build-macos:
+    needs: resolve-version
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -69,7 +73,7 @@ jobs:
           PID=$!
           sleep 5
           if ! kill -0 $PID 2>/dev/null; then
-            echo "::error::Bundle exited prematurely on launch"
+            echo "::error::macOS bundle exited prematurely on launch"
             exit 1
           fi
           osascript -e 'tell application "Arc2Zen" to quit' || kill $PID
@@ -77,24 +81,106 @@ jobs:
 
       - name: Build .dmg
         env:
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.resolve-version.outputs.version }}
         run: bash build/make_dmg.sh
 
-      - name: Upload DMG artifact (workflow_dispatch only)
-        if: github.event_name == 'workflow_dispatch'
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Arc2Zen-${{ steps.ver.outputs.version }}-arm64
+          name: macos-dmg
           path: dist/Arc2Zen-*.dmg
+          if-no-files-found: error
+
+  build-windows:
+    needs: resolve-version
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+        shell: pwsh
+
+      - name: Render app icon
+        run: pwsh -NoProfile -File build/make_iconset.ps1
+        shell: pwsh
+
+      - name: Build .exe
+        run: pwsh -NoProfile -File build/make_exe.ps1
+        shell: pwsh
+
+      - name: Smoke-test the bundle
+        # Launch the .exe, wait ~5 s, ensure the process is still alive,
+        # then stop it. Catches missing PyInstaller hidden imports
+        # (clr_loader, pythonnet) that crash on first window create.
+        run: |
+          $proc = Start-Process -FilePath "dist/Arc2Zen/Arc2Zen.exe" -PassThru
+          Start-Sleep -Seconds 5
+          if ($proc.HasExited) {
+            Write-Error "Windows bundle exited prematurely (exit code $($proc.ExitCode))"
+            exit 1
+          }
+          Stop-Process -Id $proc.Id -Force
+        shell: pwsh
+
+      - name: Build .zip
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: pwsh -NoProfile -File build/make_zip.ps1
+        shell: pwsh
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-zip
+          path: dist/Arc2Zen-*.zip
+          if-no-files-found: error
+
+  release:
+    needs: [resolve-version, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-dmg
+          path: artifacts/
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-zip
+          path: artifacts/
+
+      - name: Stage release files
+        run: |
+          ls -la artifacts/
+          cp build/INSTRUCTIONS.txt artifacts/
 
       - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Arc2Zen ${{ steps.ver.outputs.version }}
+          name: Arc2Zen ${{ needs.resolve-version.outputs.version }}
           body: |
-            Arc2Zen ${{ steps.ver.outputs.version }} — macOS arm64.
+            Arc2Zen ${{ needs.resolve-version.outputs.version }}
+
+            **macOS (Apple Silicon):** download `Arc2Zen-*-arm64.dmg`.
+            **Windows (x64):** download `Arc2Zen-*-win-x64.zip`.
 
             ## First launch (one-time setup)
 
@@ -109,10 +195,17 @@ jobs:
             4. Enter your Mac password if prompted.
             5. Click **Open Anyway** in the final confirmation dialog.
 
-            macOS only asks once — after that the app opens normally.
+            On Windows: right-click the downloaded `.zip` → **Properties**
+            → **Unblock** → OK before extracting (this strips the
+            Mark-of-the-Web from every file inside in one shot). After
+            extracting, double-click `Arc2Zen.exe`. SmartScreen may show
+            "Windows protected your PC" — click **More info** → **Run
+            anyway**.
 
-            Full instructions are also inside the DMG as `INSTRUCTIONS.txt`.
+            Full instructions are also bundled inside each artifact as
+            `INSTRUCTIONS.txt`.
           files: |
-            dist/Arc2Zen-*.dmg
-            build/INSTRUCTIONS.txt
+            artifacts/Arc2Zen-*.dmg
+            artifacts/Arc2Zen-*.zip
+            artifacts/INSTRUCTIONS.txt
           fail_on_unmatched_files: true
