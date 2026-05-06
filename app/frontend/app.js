@@ -62,7 +62,7 @@ const state = {
     includePinnedTabs: true,
     includeBookmarks: true,
     includeFavicons: true,
-    includeOpenTabs: false,
+    includeOpenTabs: true,
     includeHistory: false,
     includeCookies: false,
   },

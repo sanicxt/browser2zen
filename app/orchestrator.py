@@ -80,7 +80,7 @@ class MigrationOptions:
     include_pinned_tabs: bool = True
     include_bookmarks: bool = True
     include_favicons: bool = True
-    include_open_tabs: bool = False
+    include_open_tabs: bool = True
     include_history: bool = False
     include_cookies: bool = False
 
