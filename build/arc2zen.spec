@@ -16,6 +16,15 @@ REPO_ROOT = Path.cwd().resolve()
 SRC_DIR = REPO_ROOT / "src"
 APP_DIR = REPO_ROOT / "app"
 
+# Single source of truth for the version string. Read app/__version__.py
+# at spec evaluation time so the bundled Info.plist (macOS) / file version
+# block (Windows) and the runtime ``bridge.version()`` always agree.
+_version_globals: dict = {}
+exec(compile((APP_DIR / "__version__.py").read_text(encoding="utf-8"),
+             str(APP_DIR / "__version__.py"), "exec"),
+     _version_globals)
+VERSION = _version_globals["VERSION"]
+
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
 
@@ -127,12 +136,12 @@ if IS_MAC:
         name="Arc2Zen.app",
         icon=PLATFORM_ICON,
         bundle_identifier="com.arc2zen.app",
-        version="1.0.0",
+        version=VERSION,
         info_plist={
             "CFBundleName": "Arc2Zen",
             "CFBundleDisplayName": "Arc2Zen",
-            "CFBundleVersion": "1.0.0",
-            "CFBundleShortVersionString": "1.0.0",
+            "CFBundleVersion": VERSION,
+            "CFBundleShortVersionString": VERSION,
             "NSHighResolutionCapable": True,
             "NSRequiresAquaSystemAppearance": False,
             "LSApplicationCategoryType": "public.app-category.utilities",

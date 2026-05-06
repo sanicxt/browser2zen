@@ -61,6 +61,27 @@ def launch(debug: bool = False) -> None:
     )
     bridge.set_window(window)
 
+    # Inject the canonical version straight into the DOM as soon as the page
+    # finishes loading. Doing this here (rather than relying on a JS-bridge
+    # call from app.js) sidesteps any race between ``pywebviewready`` firing
+    # and ``window.pywebview.api`` being populated.
+    from .__version__ import VERSION
+
+    def _on_loaded() -> None:
+        try:
+            window.evaluate_js(
+                "(() => {"
+                f"  const v = {VERSION!r};"
+                "   document.body.dataset.appVersion = v;"
+                "   const node = document.getElementById('ver');"
+                "   if (node) node.textContent = 'arc2zen · v' + v;"
+                "})();"
+            )
+        except Exception as exc:
+            logger.warning(f"version injection failed: {exc}")
+
+    window.events.loaded += _on_loaded
+
     webview.start(
         debug=debug,
         private_mode=False,

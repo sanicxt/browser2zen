@@ -166,6 +166,14 @@ class Bridge:
             return "win"
         return "linux"
 
+    def version(self) -> str:
+        """Return the canonical app version string (e.g. ``"1.1.0"``)."""
+        try:
+            from .__version__ import VERSION
+            return VERSION
+        except Exception:
+            return "0.0.0"
+
     def copy_to_clipboard(self, text: str) -> bool:
         if not isinstance(text, str):
             return False

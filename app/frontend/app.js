@@ -368,9 +368,10 @@ function makeStat(n, lbl) {
 }
 
 function makeSpaceRow(s) {
-  return el("div", {class: "space-row"}, [
+  const hasColor = Array.isArray(s.color) && s.color.length === 3;
+  const row = el("div", {class: hasColor ? "space-row" : "space-row no-color"}, [
     el("div", {class: "icon", text: s.icon || "·"}),
-    el("div", {}, [
+    el("div", {class: "text"}, [
       el("div", {class: "name", text: s.name}),
       el("div", {class: "meta", text:
         `${s.folderCount} folder${s.folderCount === 1 ? "" : "s"}` +
@@ -378,6 +379,13 @@ function makeSpaceRow(s) {
     ]),
     el("div", {class: "count", text: `${s.pinnedCount} tabs`}),
   ]);
+  if (hasColor) {
+    const [r, g, b] = s.color;
+    row.style.setProperty("--space-tint-r", r);
+    row.style.setProperty("--space-tint-g", g);
+    row.style.setProperty("--space-tint-b", b);
+  }
+  return row;
 }
 
 function makeToggle(key, label, desc) {
@@ -895,14 +903,28 @@ async function setPlatformAttribute() {
   } catch (_) { /* best effort */ }
 }
 
+async function setAppVersion() {
+  const api = Bridge();
+  if (!api) return;
+  try {
+    const v = await api.version();
+    if (typeof v === "string" && v) {
+      const node = $("ver");
+      if (node) node.textContent = `arc2zen · v${v}`;
+    }
+  } catch (_) { /* best effort */ }
+}
+
 window.addEventListener("pywebviewready", () => {
   setPlatformAttribute();
+  setAppVersion();
   decorateBranding();
   setScreen("welcome");
 });
 setTimeout(() => {
   if (!Bridge()) return;
   setPlatformAttribute();
+  setAppVersion();
   decorateBranding();
   setScreen("welcome");
 }, 200);
