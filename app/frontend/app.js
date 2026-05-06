@@ -886,12 +886,23 @@ function shortenPath(p) {
 
 // ---- bootstrap ------------------------------------------------------------
 
+async function setPlatformAttribute() {
+  const api = Bridge();
+  if (!api) return;
+  try {
+    const p = await api.platform();
+    if (typeof p === "string") document.body.dataset.platform = p;
+  } catch (_) { /* best effort */ }
+}
+
 window.addEventListener("pywebviewready", () => {
+  setPlatformAttribute();
   decorateBranding();
   setScreen("welcome");
 });
 setTimeout(() => {
   if (!Bridge()) return;
+  setPlatformAttribute();
   decorateBranding();
   setScreen("welcome");
 }, 200);

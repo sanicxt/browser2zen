@@ -40,6 +40,8 @@ def launch(debug: bool = False) -> None:
     # We don't need cross-origin fetches; everything goes through the JS bridge.
     entry = (frontend / "index.html").as_uri()
 
+    is_mac = sys.platform == "darwin"
+
     window = webview.create_window(
         title="Arc2Zen",
         url=entry,
@@ -48,13 +50,14 @@ def launch(debug: bool = False) -> None:
         height=580,
         min_size=(760, 580),
         resizable=False,
-        frameless=True,
-        # easy_drag=True enables Cocoa's `mouseDownCanMoveWindow`, letting users
-        # drag the window from any non-interactive area while buttons still work.
-        # CSS `-webkit-app-region: drag` is not honoured by WKWebView.
-        easy_drag=True,
+        # macOS: frameless window with vibrancy and our custom titlebar /
+        # traffic lights. Windows: keep the OS-native title bar so we get
+        # snap zones, Aero shake, multi-monitor DPI handling, and the
+        # platform-correct close/minimize/maximize buttons for free.
+        frameless=is_mac,
+        easy_drag=is_mac,
         background_color="#0E0F12",
-        vibrancy=(sys.platform == "darwin"),
+        vibrancy=is_mac,
     )
     bridge.set_window(window)
 

@@ -25,7 +25,10 @@ button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
 
 /* ---------------------- window chrome ---------------------- */
 
-.titlebar {
+/* Fake titlebar / traffic lights only on macOS, where the window is
+   frameless. On Windows we let the OS draw the real chrome. */
+.titlebar { display: none; }
+body[data-platform="mac"] .titlebar {
   position: fixed;
   top: 0; left: 0; right: 0;
   height: 36px;
@@ -39,13 +42,13 @@ button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
   z-index: 100;
 }
 
-.tl {
+body[data-platform="mac"] .tl {
   display: flex;
   gap: 8px;
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
-.tl button {
+body[data-platform="mac"] .tl button {
   width: 12px;
   height: 12px;
   border-radius: 50%;
@@ -56,12 +59,12 @@ button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
   transition: background var(--dur-fast) var(--ease-standard);
   position: relative;
 }
-.tl:hover button.tl-close { background: var(--tl-close); }
-.tl:hover button.tl-min   { background: var(--tl-min); }
-.tl:hover button.tl-max   { background: var(--tl-max); }
-.tl button:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+body[data-platform="mac"] .tl:hover button.tl-close { background: var(--tl-close); }
+body[data-platform="mac"] .tl:hover button.tl-min   { background: var(--tl-min); }
+body[data-platform="mac"] .tl:hover button.tl-max   { background: var(--tl-max); }
+body[data-platform="mac"] .tl button:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 
-.titlebar .ver {
+body[data-platform="mac"] .titlebar .ver {
   margin-left: auto;
   font-size: var(--fs-tiny);
   color: var(--text-tertiary);
@@ -72,8 +75,12 @@ button:focus-visible { outline: none; box-shadow: var(--shadow-focus); }
 
 main {
   position: absolute;
-  top: 36px; left: 0; right: 0; bottom: 0;
+  top: 0; left: 0; right: 0; bottom: 0;
   display: grid;
+}
+body[data-platform="mac"] main {
+  /* Leave room for the custom titlebar on macOS. */
+  top: 36px;
 }
 .screen {
   grid-area: 1 / 1;
