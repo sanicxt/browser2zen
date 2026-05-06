@@ -4,9 +4,7 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -19,6 +17,19 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+
+# PyInstaller / packaging output (the .app, .dmg, transient build cache).
+# Note: our `build/` directory at the repo root holds source build scripts
+# (spec, shell scripts) and is committed; the `build/arc2zen/` subdir that
+# PyInstaller generates is not.
+dist/
+/build/arc2zen/
+/build/__pycache__/
+*.spec.bak
+
+# Generated app icon. Re-rendered locally via build/make_iconset.sh and on
+# CI before each release, so it doesn't need to be checked in.
+app/assets/icon.icns
 
 # Virtual environments
 venv/
