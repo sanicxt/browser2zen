@@ -46,17 +46,31 @@ class EnvReport:
 # ---------- Arc ----------
 
 
-def _arc_user_data_dir() -> Path:
+def _arc_user_data_dirs() -> list[Path]:
+    """Return every plausible Arc User Data root for the current OS.
+
+    Windows users may have either the UWP package or the standalone-installer
+    layout, occasionally both. macOS only uses one canonical location.
+    """
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library/Application Support/Arc/User Data"
+        return [home / "Library/Application Support/Arc/User Data"]
     if os.name == "nt":
-        return (
-            home
-            / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
-            / "LocalCache/Local/Arc/User Data"
-        )
-    return home / ".config/Arc/User Data"
+        return [
+            home / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
+                 / "LocalCache/Local/Arc/User Data",
+            home / "AppData/Local/Arc/User Data",
+        ]
+    return [home / ".config/Arc/User Data"]
+
+
+def _arc_user_data_dir() -> Optional[Path]:
+    """First existing Arc User Data dir, or the canonical-but-missing one."""
+    candidates = _arc_user_data_dirs()
+    for c in candidates:
+        if c.is_dir():
+            return c
+    return candidates[0] if candidates else None
 
 
 def _arc_storable_sidebar() -> Optional[Path]:
@@ -66,6 +80,7 @@ def _arc_storable_sidebar() -> Optional[Path]:
         home / "Library/Application Support/Arc/StorableSidebar.json",
         home / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
              / "LocalCache/Local/Arc/StorableSidebar.json",
+        home / "AppData/Local/Arc/StorableSidebar.json",
     ]
     for c in candidates:
         if c.is_file():
@@ -73,15 +88,19 @@ def _arc_storable_sidebar() -> Optional[Path]:
     return None
 
 
-def _arc_profiles(user_data: Path) -> list[str]:
-    if not user_data.is_dir():
+def _arc_profiles(user_data: Optional[Path]) -> list[str]:
+    """List Arc profile directory names. Newer Chromium builds keep the
+    History SQLite at ``<profile>/History``; some store it under
+    ``<profile>/Network/`` after the cookie/network split. Either is a
+    sufficient sign of a real profile.
+    """
+    if user_data is None or not user_data.is_dir():
         return []
     out: list[str] = []
     for entry in sorted(user_data.iterdir()):
         if not entry.is_dir():
             continue
-        # Arc's per-profile dirs always contain a History SQLite file
-        if (entry / "History").is_file():
+        if (entry / "History").is_file() or (entry / "Network" / "Cookies").is_file():
             out.append(entry.name)
     return out
 
@@ -145,7 +164,27 @@ def _pgrep_any(paths: tuple[str, ...]) -> bool:
     return False
 
 
+def _tasklist_running(image_names: tuple[str, ...]) -> bool:
+    """Windows: faster running-process check via ``tasklist`` (~50 ms cold)
+    rather than ``Get-Process`` via PowerShell (~300 ms cold).
+    """
+    for name in image_names:
+        try:
+            r = subprocess.run(
+                ["tasklist", "/fi", f"imagename eq {name}", "/fo", "csv", "/nh"],
+                capture_output=True, text=True, timeout=4,
+            )
+        except Exception:
+            continue
+        # ``tasklist`` prints a notice line ("INFO: No tasks ...") on stdout
+        # when nothing matches; success means at least one CSV row.
+        if r.returncode == 0 and r.stdout and name.lower() in r.stdout.lower():
+            return True
+    return False
+
+
 def _powershell_running(name: str) -> bool:
+    """Slower PowerShell-based fallback, kept for parity."""
     try:
         r = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
@@ -157,11 +196,15 @@ def _powershell_running(name: str) -> bool:
     return r.returncode == 0 and (r.stdout or "0").strip() != "0"
 
 
+_ARC_WINDOWS_IMAGES = ("Arc.exe",)
+_ZEN_WINDOWS_IMAGES = ("zen.exe", "zen-bin.exe")
+
+
 def is_arc_running() -> bool:
     if sys.platform == "darwin" or sys.platform == "linux":
         return _pgrep_any(_ARC_PROCESS_PATHS)
     if os.name == "nt":
-        return _powershell_running("Arc")
+        return _tasklist_running(_ARC_WINDOWS_IMAGES)
     return False
 
 
@@ -169,7 +212,7 @@ def is_zen_running() -> bool:
     if sys.platform == "darwin" or sys.platform == "linux":
         return _pgrep_any(_ZEN_PROCESS_PATHS)
     if os.name == "nt":
-        return _powershell_running("zen") or _powershell_running("Zen")
+        return _tasklist_running(_ZEN_WINDOWS_IMAGES)
     return False
 
 

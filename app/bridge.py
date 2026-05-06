@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import threading
 import time
@@ -148,27 +149,40 @@ class Bridge:
         return open_in_finder(path)
 
     def open_url(self, url: str) -> bool:
-        """Open an https:// URL in the user's default browser."""
+        """Open an http(s) URL in the user's default browser, cross-platform."""
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             return False
-        if sys.platform != "darwin":
-            return False
         try:
-            import subprocess
-            subprocess.run(["open", url], capture_output=True, timeout=5)
-            return True
+            import webbrowser
+            return webbrowser.open(url, new=2)
         except Exception:
             return False
 
-    def copy_to_clipboard(self, text: str) -> bool:
+    def platform(self) -> str:
+        """Return ``"mac"``, ``"win"``, or ``"linux"`` for the JS side to gate UI."""
         if sys.platform == "darwin":
-            try:
-                import subprocess
+            return "mac"
+        if os.name == "nt":
+            return "win"
+        return "linux"
+
+    def copy_to_clipboard(self, text: str) -> bool:
+        if not isinstance(text, str):
+            return False
+        try:
+            import subprocess
+            if sys.platform == "darwin":
                 p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
                 p.communicate(input=text.encode("utf-8"), timeout=2)
                 return p.returncode == 0
-            except Exception:
-                return False
+            if os.name == "nt":
+                # clip.exe ships with every Windows install. It expects
+                # UTF-16 LE on stdin; pass without a BOM.
+                p = subprocess.Popen(["clip.exe"], stdin=subprocess.PIPE)
+                p.communicate(input=text.encode("utf-16-le"), timeout=2)
+                return p.returncode == 0
+        except Exception:
+            return False
         return False
 
     # ---------- environment / preview / migration --------------
