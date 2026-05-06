@@ -7,7 +7,7 @@ macOS Keychain "Arc Safe Storage" entry) and writes them into Zen's
 Firefox-format `cookies.sqlite` so login sessions carry over.
 
 macOS only. Reading the Keychain may trigger an "always allow / allow"
-prompt the first time. The script is idempotent — re-running merges new
+prompt the first time. The script is idempotent: re-running merges new
 cookies without duplicating existing ones.
 """
 
@@ -286,7 +286,7 @@ class CookiesImporter:
 
             for c in cookies:
                 # Modern Firefox stores `expiry` as MILLISECONDS since epoch
-                # (legacy was seconds — switched ~v108). Surviving native cookies
+                # (legacy was seconds; switched ~v108). Surviving native cookies
                 # in this profile confirmed the new format.
                 if not c["has_expires"] or not c["expires_us"]:
                     expiry_ms = session_expiry_ms

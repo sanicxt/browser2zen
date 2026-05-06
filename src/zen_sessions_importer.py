@@ -262,7 +262,7 @@ class ZenSessionsImporter:
             )
             zen_tabs.append(zen_tab)
 
-        # Create about:blank placeholder tab per folder — Zen requires this for validation
+        # Create about:blank placeholder tab per folder - Zen requires this for validation
         timestamp_ms = int(time.time() * 1000)
         for folder in zen_folders:
             placeholder_sync_id = self._generate_sync_id()
@@ -316,7 +316,7 @@ class ZenSessionsImporter:
         merged["splitViewData"] = existing.get("splitViewData", [])
         merged["lastCollected"] = int(time.time() * 1000)
 
-        # Build groups array from ALL folders — Zen injects sidebar.groups into
+        # Build groups array from ALL folders - Zen injects sidebar.groups into
         # the sessionstore initialState so Firefox creates tab-group DOM elements.
         # Without matching groups, gZenFolders.restoreDataFromSessionStore() can't
         # find the DOM elements by ID and silently skips all folders.
@@ -342,7 +342,7 @@ class ZenSessionsImporter:
     def _sync_sessionstore(self, merged: dict) -> None:
         """Sync zen-sessions data into sessionstore as a supplementary safety net.
 
-        zen-sessions.jsonlz4 is the authoritative source — on startup, Zen's
+        zen-sessions.jsonlz4 is the authoritative source - on startup, Zen's
         #restoreWindowData() injects its groups/tabs/folders/spaces into Firefox's
         initialState, overwriting whatever was in the sessionstore. This sync
         is belt-and-suspenders: it pre-populates the sessionstore so that even

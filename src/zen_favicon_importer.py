@@ -41,7 +41,7 @@ def _hash_string(s: str) -> int:
 
 
 def hash_page_url(url: str) -> int:
-    """places::HashURL — 48-bit hash with prefix in upper 16 bits."""
+    """places::HashURL. 48-bit hash with prefix in upper 16 bits."""
     full = _hash_string(url)
     idx = url.find(":")
     prefix = _hash_string(url[:idx]) if idx > 0 else 0
@@ -83,7 +83,7 @@ def _detect_image_mime(blob: bytes) -> str:
         return "image/x-icon"
     if blob.lstrip()[:5] in (b"<?xml", b"<svg "):
         return "image/svg+xml"
-    return "image/png"  # safest default — Firefox decoders accept misnamed PNGs
+    return "image/png"  # safest default. Firefox decoders accept misnamed PNGs
 
 
 class FaviconImporter:
@@ -162,7 +162,7 @@ class FaviconImporter:
             if origin:
                 origin_to_original.setdefault(origin, url)
 
-        # (page_url -> (icon_url, image_bytes, width, score)) — score is the tie-breaker.
+        # page_url -> (icon_url, image_bytes, width, score). score is the tie-breaker.
         best: dict[str, tuple[str, bytes, int, tuple]] = {}
 
         for arc_db in self.find_arc_favicon_dbs():
@@ -256,7 +256,7 @@ class FaviconImporter:
         result = {"requested": len(urls), "matched": 0, "updated": 0, "skipped": 0}
         sessions_file = self.zen_profile / "zen-sessions.jsonlz4"
         if not sessions_file.exists():
-            logger.warning(f"zen-sessions.jsonlz4 not found at {sessions_file} — skipping inline injection")
+            logger.warning(f"zen-sessions.jsonlz4 not found at {sessions_file}. skipping inline injection")
             result["error"] = "sessions_missing"
             return result
 
@@ -284,7 +284,7 @@ class FaviconImporter:
             result["dry_run"] = True
             return result
 
-        # Read, mutate, write — with a backup first.
+        # Read, mutate, write (with a backup first).
         backup = sessions_file.with_name(f"{sessions_file.name}.backup.{int(time.time())}")
         shutil.copy2(sessions_file, backup)
         logger.info(f"💾 Backed up zen-sessions.jsonlz4 → {backup.name}")
@@ -505,7 +505,7 @@ def main() -> int:
         urls = list(dict.fromkeys(_iter_pinned_urls(data)))
         logger.info(f"Found {len(urls)} unique URLs in {export_path.name}")
     else:
-        logger.info(f"No {export_path.name} found — extracting URLs from Arc")
+        logger.info(f"No {export_path.name} found: extracting URLs from Arc")
         from arc_pinned_tab_extractor import ArcPinnedTabExtractor
         extractor = ArcPinnedTabExtractor()
         spaces = extractor.extract_pinned_tabs()
