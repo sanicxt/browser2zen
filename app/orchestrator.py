@@ -20,7 +20,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Iterator, Optional, Tuple
 
 # Make ``src/`` importable when running from the repo root or as a packaged app.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -53,6 +53,10 @@ class SpaceSummary:
     open_count: int
     folder_count: int
     essential_count: int = 0
+    # Arc midTone colour as integer RGB (0-255) so the frontend can tint the
+    # space card background to match the Arc workspace. ``None`` when the
+    # space has no theme set.
+    color: Optional[Tuple[int, int, int]] = None
 
 
 @dataclass(frozen=True)
@@ -139,6 +143,13 @@ class MigrationOrchestrator:
             open_count = len(s.open_tabs or [])
             essential = sum(1 for t in (s.pinned_tabs or []) if getattr(t, "is_essential", False))
             folder_count = len(s.folders or [])
+            color_rgb: Optional[Tuple[int, int, int]] = None
+            if s.color and all(k in s.color for k in ("r", "g", "b")):
+                color_rgb = (
+                    int(round(s.color["r"] * 255)),
+                    int(round(s.color["g"] * 255)),
+                    int(round(s.color["b"] * 255)),
+                )
             space_summaries.append(SpaceSummary(
                 name=s.space_name,
                 icon=s.icon,
@@ -146,6 +157,7 @@ class MigrationOrchestrator:
                 open_count=open_count,
                 folder_count=folder_count,
                 essential_count=essential,
+                color=color_rgb,
             ))
             pinned_total += pinned_count
             open_total += open_count
@@ -460,6 +472,7 @@ def preview_to_dict(report: PreviewReport) -> dict:
                 "openCount": s.open_count,
                 "folderCount": s.folder_count,
                 "essentialCount": s.essential_count,
+                "color": list(s.color) if s.color else None,
             }
             for s in report.spaces
         ],

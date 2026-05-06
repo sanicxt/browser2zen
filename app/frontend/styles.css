@@ -402,25 +402,54 @@ body[data-platform="mac"] main {
   gap: var(--space-3);
 }
 .space-row {
+  --space-tint-r: 255;
+  --space-tint-g: 255;
+  --space-tint-b: 255;
+  --space-tint: rgba(var(--space-tint-r), var(--space-tint-g), var(--space-tint-b), 0.12);
+  --space-tint-strong: rgba(var(--space-tint-r), var(--space-tint-g), var(--space-tint-b), 0.45);
+  --space-edge: rgba(var(--space-tint-r), var(--space-tint-g), var(--space-tint-b), 0.30);
+
+  position: relative;
   display: grid;
   grid-template-columns: 32px 1fr auto;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  background: var(--bg-elev);
-  border: 1px solid var(--bd-soft);
+  /* Leave 4 px on the left for the absolutely-positioned coloured edge. */
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-4) + 4px);
+  background:
+    linear-gradient(135deg, var(--space-tint) 0%, transparent 70%),
+    var(--bg-elev);
+  border: 1px solid var(--space-edge);
   border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.space-row::before {
+  /* Coloured left edge — absolutely positioned so it spans the full row
+     height regardless of the grid auto-row sizing. */
+  content: "";
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: var(--space-tint-strong);
 }
 .space-row .icon {
   width: 28px; height: 28px;
   display: grid; place-items: center;
   font-size: 18px;
-  background: var(--bg-elev-hi);
+  background: rgba(var(--space-tint-r), var(--space-tint-g), var(--space-tint-b), 0.22);
   border-radius: var(--radius-sm);
 }
+.space-row .text { min-width: 0; }
 .space-row .name { font-weight: var(--fw-medium); }
 .space-row .meta { font-size: var(--fs-tiny); color: var(--text-tertiary); }
 .space-row .count { font-size: var(--fs-small); color: var(--text-secondary); }
+.space-row.no-color {
+  /* Spaces without an Arc colour fall back to the bare card style. */
+  background: var(--bg-elev);
+  border-color: var(--bd-soft);
+  padding-left: var(--space-4);
+}
+.space-row.no-color::before { display: none; }
 
 .toggles {
   margin-top: var(--space-5);
