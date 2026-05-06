@@ -1,6 +1,9 @@
 MIT License
 
-Copyright (c) 2025 Arc to Zen Migration Tool
+Copyright (c) 2025 browser2zen contributors
+
+Based on arc2zen by Rafael Cabezas (https://github.com/rafcabezas/arc2zen),
+also licensed MIT.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

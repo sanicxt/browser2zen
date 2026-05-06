@@ -1,17 +1,23 @@
-# Arc → Zen
+# browser2zen
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows%20x64-lightgrey?logo=apple)](https://github.com/rafcabezas/arc2zen/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20arm64%20%7C%20Windows%20x64-lightgrey?logo=apple)](https://github.com/tarikbc/browser2zen/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.7%2B-yellow?logo=python&logoColor=white)](https://www.python.org/)
 [![PyWebView](https://img.shields.io/badge/GUI-PyWebView-5e86ff)](https://pywebview.flowrl.com/)
-[![Latest release](https://img.shields.io/github/v/release/rafcabezas/arc2zen?display_name=tag&label=release)](./releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/tarikbc/browser2zen?display_name=tag&label=release)](./releases/latest)
 
-Move your Arc browser setup to [Zen Browser](https://zen-browser.app/)
-in under a minute. Workspaces, pinned tabs, folders, bookmarks, browsing
-history, and login state, all carried across.
+Move any browser to [Zen Browser](https://zen-browser.app/) in under a
+minute. **Arc, Chrome, Edge, Brave, Firefox, and Safari** are all
+supported as sources. Workspaces, pinned tabs, bookmarks, browsing
+history, and login state come across.
 
 A polished single-window app handles the whole migration for you. No
 terminal, no Python, no install steps to follow.
+
+> Originally based on [`arc2zen`](https://github.com/rafcabezas/arc2zen)
+> by Rafael Cabezas (MIT). The Arc-specific extractor and the Zen-side
+> writers are inherited from that project; the multi-source architecture
+> and the Chrome/Edge/Brave/Firefox/Safari adapters are new here.
 
 ---
 
