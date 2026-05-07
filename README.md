@@ -86,6 +86,19 @@ Recycle Bin; nothing else needs to be uninstalled.
 >
 > Both platforms are reproducible from source: see [`build/`](./build).
 
+### Linux (x86_64)
+
+1. Download `browser2zen-x.y.z-linux-x86_64.tar.gz`.
+2. Install the GTK 3 + WebKit2GTK runtime if you don't already have it:
+   - Debian / Ubuntu: `sudo apt install python3-gi gir1.2-webkit2-4.1`
+   - Fedora: `sudo dnf install python3-gobject webkit2gtk4.1`
+   - Arch: `sudo pacman -S python-gobject webkit2gtk-4.1`
+3. Extract: `tar -xzf browser2zen-*-linux-x86_64.tar.gz`.
+4. Run: `./browser2zen/browser2zen`.
+
+The Linux bundle is a PyInstaller `--onedir` build with no installer.
+Drop the folder anywhere; delete it when you're done.
+
 ### Don't have Zen yet?
 
 If Zen Browser isn't installed yet, the detection screen offers a

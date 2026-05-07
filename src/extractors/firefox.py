@@ -323,15 +323,29 @@ class FirefoxExtractor(BrowserExtractor):
     def _stable_folder_id(space_id: str, folder_path: list[str]) -> str:
         return str(uuid.uuid5(_NS_FOLDER, space_id + "/" + "/".join(folder_path)))
 
-    # ---------- cookies / history (deferred) ----------
+    # ---------- history / cookies ----------
+    #
+    # Firefox shares Zen's schema, so the orchestrator dispatches by
+    # source.name to the Firefox-flavoured importers in
+    # ``src/firefox_history_importer.py`` and
+    # ``src/firefox_cookies_importer.py``. We expose the source paths
+    # here and skip the Chromium-style cookie_master_key entirely.
+
+    def history_db_paths(self) -> list[Path]:
+        return [p / "places.sqlite" for p in self.profile_paths()
+                if (p / "places.sqlite").is_file()]
+
+    def cookie_db_paths(self) -> list[Path]:
+        return [p / "cookies.sqlite" for p in self.profile_paths()
+                if (p / "cookies.sqlite").is_file()]
 
     def cookie_master_key(self) -> bytes:
-        # Firefox cookies share Zen's schema so a Firefox→Zen import
-        # would be a moz_cookies → moz_cookies merge, not a decrypt.
-        # That's a separate code path which doesn't exist yet.
+        # Firefox cookies are unencrypted at rest; the importer dispatches
+        # on source.name and never calls this. Kept as a defensive raise.
         raise BrowserExtractorError(
-            "firefox_cookies_unsupported",
-            "Firefox cookie migration isn't implemented in this release.",
+            "firefox_cookies_use_direct_path",
+            "Firefox cookies should be imported via FirefoxCookiesImporter, "
+            "not via the Chromium key-unwrap path.",
         )
 
 

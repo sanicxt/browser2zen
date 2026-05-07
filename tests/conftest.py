@@ -60,6 +60,10 @@ _SOURCE_TREES = {
     "safari": {
         "safari/Library/Safari/Bookmarks.plist":
             "Library/Safari/Bookmarks.plist",
+        "safari/Library/Safari/History.db":
+            "Library/Safari/History.db",
+        "safari/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies":
+            "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
     },
 }
 

@@ -146,8 +146,65 @@ jobs:
           path: dist/browser2zen-*.zip
           if-no-files-found: error
 
+  build-linux:
+    needs: resolve-version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install GTK runtime + build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3-gi gir1.2-webkit2-4.1 libgirepository1.0-dev libcairo2-dev \
+            xvfb
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+          pip install pygobject pycairo
+
+      - name: Build .tar.gz
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          set -e
+          pyinstaller --noconfirm --clean build/browser2zen.spec
+          # PyInstaller leaves dist/browser2zen/browser2zen + _internal/.
+          test -x dist/browser2zen/browser2zen
+          # Smoke-test under xvfb so the GTK init doesn't crash.
+          xvfb-run -a dist/browser2zen/browser2zen --debug &
+          PID=$!
+          sleep 5
+          if ! kill -0 $PID 2>/dev/null; then
+            echo "::error::Linux bundle exited prematurely on launch"
+            exit 1
+          fi
+          kill $PID || true
+          wait $PID 2>/dev/null || true
+          # Bundle as tar.gz with the browser2zen folder at the top.
+          ARCHIVE="dist/browser2zen-${VERSION}-linux-x86_64.tar.gz"
+          tar -czf "$ARCHIVE" -C dist browser2zen
+          ls -lh "$ARCHIVE"
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tar
+          path: dist/browser2zen-*.tar.gz
+          if-no-files-found: error
+
   release:
-    needs: [resolve-version, build-macos, build-windows]
+    needs: [resolve-version, build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
@@ -166,6 +223,12 @@ jobs:
           name: windows-zip
           path: artifacts/
 
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-tar
+          path: artifacts/
+
       - name: Stage release files
         run: |
           ls -la artifacts/
@@ -181,6 +244,7 @@ jobs:
 
             **macOS (Apple Silicon):** download `browser2zen-*-arm64.dmg`.
             **Windows (x64):** download `browser2zen-*-win-x64.zip`.
+            **Linux (x86_64):** download `browser2zen-*-linux-x86_64.tar.gz`.
 
             ## First launch (one-time setup)
 
@@ -202,10 +266,16 @@ jobs:
             "Windows protected your PC" — click **More info** → **Run
             anyway**.
 
+            On Linux: extract the tarball (`tar -xzf browser2zen-*-linux-x86_64.tar.gz`)
+            and run `./browser2zen/browser2zen`. Requires GTK 3 + WebKit2GTK at
+            runtime: `sudo apt install python3-gi gir1.2-webkit2-4.1` on Debian /
+            Ubuntu, equivalent packages on Fedora and Arch.
+
             Full instructions are also bundled inside each artifact as
             `INSTRUCTIONS.txt`.
           files: |
             artifacts/browser2zen-*.dmg
             artifacts/browser2zen-*.zip
+            artifacts/browser2zen-*.tar.gz
             artifacts/INSTRUCTIONS.txt
           fail_on_unmatched_files: true

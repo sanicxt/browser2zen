@@ -28,19 +28,20 @@ VERSION = _v_match.group(1)
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
+IS_LINUX = sys.platform.startswith("linux")
 
 # ---- platform-specific Analysis inputs -----------------------------------
 
-PLATFORM_HIDDEN_IMPORTS = (
-    [
+if IS_MAC:
+    PLATFORM_HIDDEN_IMPORTS = [
         "webview.platforms.cocoa",
         "objc",
         "Foundation",
         "AppKit",
         "WebKit",
     ]
-    if IS_MAC
-    else [
+elif IS_WIN:
+    PLATFORM_HIDDEN_IMPORTS = [
         # WebView2 backend on Windows. pywebview lazy-imports these via
         # ``webview/platforms/edgechromium.py``; PyInstaller's static
         # analysis doesn't see them without a hint.
@@ -49,13 +50,29 @@ PLATFORM_HIDDEN_IMPORTS = (
         "clr_loader",
         "pythonnet",
     ]
-)
+else:  # Linux
+    PLATFORM_HIDDEN_IMPORTS = [
+        # GTK + WebKit2 backend.
+        "webview.platforms.gtk",
+        "gi",
+        "gi.repository.Gtk",
+        "gi.repository.WebKit2",
+        "gi.repository.GLib",
+    ]
 
-ICON_NAME = "icon.icns" if IS_MAC else "icon.ico"
-PLATFORM_ICON = str(APP_DIR / "assets" / ICON_NAME)
+# Linux skips the bundled icon: PyInstaller's Linux EXE() doesn't accept
+# .icns/.ico, and rendering a .png iconset on CI would mean adding
+# rsvg-convert. PyInstaller-Linux doesn't need an icon at all.
+if IS_MAC:
+    PLATFORM_ICON = str(APP_DIR / "assets" / "icon.icns")
+elif IS_WIN:
+    PLATFORM_ICON = str(APP_DIR / "assets" / "icon.ico")
+else:
+    PLATFORM_ICON = None
 
-# Don't pin ``target_arch`` on Windows: PyInstaller picks the host arch
-# correctly. Pinning would break if/when GitHub moves to ARM64 runners.
+# Don't pin ``target_arch`` on Windows or Linux: PyInstaller picks the
+# host arch correctly. Pinning would break if/when GitHub moves to ARM64
+# runners.
 TARGET_ARCH = "arm64" if IS_MAC else None
 
 block_cipher = None

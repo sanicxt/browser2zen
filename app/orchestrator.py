@@ -145,6 +145,15 @@ _COOKIE_ERROR_MESSAGES = {
         "migrated. Sign in fresh on imported sites.",
     "dpapi_failed":
         "Windows DPAPI rejected the cookie key; cookies skipped.",
+    # Firefox
+    "firefox_master_password_set":
+        "Firefox profile has a master password set. Cookies stay encrypted in NSS "
+        "and can't be migrated. Sign in fresh on imported sites.",
+    # Safari
+    "safari_needs_full_disk_access":
+        "macOS hides Safari's cookie store behind Full Disk Access. "
+        "Open System Settings, Privacy & Security, Full Disk Access, enable "
+        "browser2zen, then click Recheck.",
     # Both
     "unsupported_platform":
         "Cookie import only supports macOS and Windows.",
@@ -454,10 +463,23 @@ class MigrationOrchestrator:
         if opts.include_history:
             self._start_step("history")
             try:
-                h = HistoryImporter(
-                    zen_profile, dry_run=False,
-                    history_dbs=self.source.history_db_paths(),
-                )
+                if self.source.name == "firefox":
+                    from firefox_history_importer import FirefoxHistoryImporter
+                    h = FirefoxHistoryImporter(
+                        zen_profile, dry_run=False,
+                        history_dbs=self.source.history_db_paths(),
+                    )
+                elif self.source.name == "safari":
+                    from safari_history_importer import SafariHistoryImporter
+                    h = SafariHistoryImporter(
+                        zen_profile, dry_run=False,
+                        history_dbs=self.source.history_db_paths(),
+                    )
+                else:
+                    h = HistoryImporter(
+                        zen_profile, dry_run=False,
+                        history_dbs=self.source.history_db_paths(),
+                    )
                 summary = h.import_history()
                 self._done_step("history", summary=summary)
             except Exception as exc:
@@ -469,14 +491,29 @@ class MigrationOrchestrator:
             self._start_step("cookies")
             try:
                 container_ids = _discover_user_containers(zen_profile)
-                c = CookiesImporter(
-                    zen_profile, dry_run=False,
-                    container_ids=container_ids,
-                    cookie_dbs=self.source.cookie_db_paths(),
-                    keychain_service=getattr(self.source, "keychain_service", "Arc Safe Storage"),
-                    keychain_account=getattr(self.source, "keychain_account", "Arc"),
-                    local_state_paths=self.source.local_state_paths(),
-                )
+                if self.source.name == "firefox":
+                    from firefox_cookies_importer import FirefoxCookiesImporter
+                    c = FirefoxCookiesImporter(
+                        zen_profile, dry_run=False,
+                        container_ids=container_ids,
+                        cookie_dbs=self.source.cookie_db_paths(),
+                    )
+                elif self.source.name == "safari":
+                    from safari_cookies_importer import SafariCookiesImporter
+                    c = SafariCookiesImporter(
+                        zen_profile, dry_run=False,
+                        container_ids=container_ids,
+                        cookie_dbs=self.source.cookie_db_paths(),
+                    )
+                else:
+                    c = CookiesImporter(
+                        zen_profile, dry_run=False,
+                        container_ids=container_ids,
+                        cookie_dbs=self.source.cookie_db_paths(),
+                        keychain_service=getattr(self.source, "keychain_service", "Arc Safe Storage"),
+                        keychain_account=getattr(self.source, "keychain_account", "Arc"),
+                        local_state_paths=self.source.local_state_paths(),
+                    )
                 summary = c.import_cookies()
                 if summary.get("error"):
                     err = summary["error"]

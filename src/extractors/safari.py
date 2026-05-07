@@ -274,13 +274,31 @@ class SafariExtractor(BrowserExtractor):
     def _stable_folder_id(space_id: str, folder_path: list[str]) -> str:
         return str(uuid.uuid5(_NS_FOLDER, space_id + "/" + "/".join(folder_path)))
 
-    # ---------- cookies / history (deferred) ----------
+    # ---------- history / cookies ----------
+    #
+    # Safari has its own importers (SQLite History.db reader and a
+    # binarycookies parser). The orchestrator dispatches by source.name
+    # so the Chromium importers don't get called with these paths.
+
+    def history_db_paths(self) -> list[Path]:
+        history = Path.home() / "Library/Safari/History.db"
+        return [history] if history.is_file() else []
+
+    def cookie_db_paths(self) -> list[Path]:
+        # Sandboxed Safari (modern macOS) keeps cookies inside its
+        # container. We try both locations and return the first that
+        # exists.
+        candidates = (
+            Path.home() / "Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies",
+            Path.home() / "Library/Cookies/Cookies.binarycookies",
+        )
+        return [p for p in candidates if p.is_file()]
 
     def cookie_master_key(self) -> bytes:
-        # Safari cookies live in Cookies.binarycookies (Apple's custom
-        # binary format) and are not encrypted; reading them is a parser
-        # problem, not a crypto one. Not implemented for v1.
+        # Safari cookies are unencrypted; the orchestrator never hits
+        # this path for Safari. Defensive raise.
         raise BrowserExtractorError(
-            "safari_cookies_unsupported",
-            "Safari cookie migration isn't implemented in this release.",
+            "safari_cookies_use_direct_path",
+            "Safari cookies should be imported via SafariCookiesImporter, "
+            "not via the Chromium key-unwrap path.",
         )
