@@ -1,3 +1,7 @@
+<p align="left">
+  <img src="docs/branding/icon-256.png" alt="browser2zen icon" width="120" height="120">
+</p>
+
 # browser2zen
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
