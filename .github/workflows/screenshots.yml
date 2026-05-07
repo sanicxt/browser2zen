@@ -6,6 +6,12 @@ on:
       - "app/frontend/**"
       - "docs/screenshots/**"
       - ".github/workflows/screenshots.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/frontend/**"
+      - "docs/screenshots/**"
+      - ".github/workflows/screenshots.yml"
   workflow_dispatch:
 
 permissions:
@@ -17,20 +23,23 @@ concurrency:
 
 jobs:
   shoot:
-    # Skip PRs from forks: GITHUB_TOKEN can't push to a fork branch, and
-    # we don't want to run untrusted JS with write permissions anyway.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Skip PRs from forks (GITHUB_TOKEN can't push to a fork branch and we
+    # don't want untrusted JS running with write perms). Push events to
+    # this repo always run.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      # Bind once and reuse — keeps the `ref:` input out of any shell
-      # expansion path even though actions/checkout doesn't shell-eval it.
-      PR_HEAD_REF: ${{ github.head_ref }}
+      # On PRs we check out the PR head branch (so we can commit refreshed
+      # PNGs back to it). On pushes we let actions/checkout default to
+      # github.ref (e.g. refs/heads/main). Bind via env so the value
+      # stays clear of any shell expansion path.
+      CHECKOUT_REF: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
     steps:
-      - name: Checkout PR branch
+      - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.PR_HEAD_REF }}
+          ref: ${{ env.CHECKOUT_REF }}
           fetch-depth: 0
 
       - name: Setup Node
