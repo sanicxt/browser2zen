@@ -7,12 +7,12 @@ This provides the actual user-organized pinned tabs, not browsing history.
 """
 
 import json
-from pathlib import Path
-from typing import List, Dict, Optional, Any
-from dataclasses import dataclass, asdict
-from datetime import datetime, timezone
 import logging
 import os
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -25,13 +25,13 @@ class ArcPinnedTab:
     title: str
     space_id: str
     space_name: str
-    folder_path: List[str]  # Path from space root to tab (e.g., ["Finances"])
+    folder_path: list[str]  # Path from space root to tab (e.g., ["Finances"])
     tab_id: str
     parent_id: str
     index: int  # Original position in Arc sidebar
     is_essential: bool = False  # True if this was an Essential tab in Arc
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return asdict(self)
 
@@ -42,7 +42,7 @@ class ArcFolder:
     title: str
     parent_id: str
     space_id: str
-    children_ids: List[str]
+    children_ids: list[str]
     index: int  # Position in Arc sidebar
 
 @dataclass
@@ -55,7 +55,7 @@ class ArcOpenTab:
     tab_id: str
     index: int
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
 @dataclass
@@ -63,11 +63,11 @@ class ArcSpace:
     """Represents an Arc space with its pinned tabs, open tabs, and folders."""
     space_id: str
     space_name: str
-    pinned_tabs: List[ArcPinnedTab]
-    folders: List[ArcFolder]
-    open_tabs: List[ArcOpenTab]
-    icon: Optional[str] = None
-    color: Optional[dict] = None
+    pinned_tabs: list[ArcPinnedTab]
+    folders: list[ArcFolder]
+    open_tabs: list[ArcOpenTab]
+    icon: str | None = None
+    color: dict | None = None
 
     def __str__(self):
         icon_str = f" ({self.icon})" if self.icon else ""
@@ -85,14 +85,14 @@ class ArcPinnedTabExtractor:
             self.home_dir = Path.home()
             self.arc_sidebar_file = self.home_dir / "Library/Application Support/Arc/StorableSidebar.json"
 
-    def extract_pinned_tabs(self) -> List[ArcSpace]:
+    def extract_pinned_tabs(self) -> list[ArcSpace]:
         """Extract all pinned tabs organized by spaces with folder structure."""
         if not self.arc_sidebar_file.exists():
             logger.error(f"Arc StorableSidebar.json not found: {self.arc_sidebar_file}")
             return []
 
         try:
-            with open(self.arc_sidebar_file, 'r', encoding="utf-8") as f:
+            with open(self.arc_sidebar_file, encoding="utf-8") as f:
                 sidebar_data = json.load(f)
 
             logger.info("✅ Loaded Arc StorableSidebar.json")
@@ -111,7 +111,7 @@ class ArcPinnedTabExtractor:
             logger.error(f"Failed to parse StorableSidebar.json: {e}")
             return []
 
-    def _parse_local_sidebar_data(self, data: Dict) -> List[ArcSpace]:
+    def _parse_local_sidebar_data(self, data: dict) -> list[ArcSpace]:
         """Parse the local sidebar data structure (much simpler approach)."""
         arc_spaces = []
 
@@ -351,7 +351,7 @@ class ArcPinnedTabExtractor:
 
                             # Start recursive processing with top-level display order
                             process_items_recursive(display_order)
-                            
+
                             # Also extract unpinned (open) tabs
                             unpinned_order = self._get_unpinned_tab_order(space_id, items_lookup, data)
                             open_tabs = []
@@ -427,7 +427,7 @@ class ArcPinnedTabExtractor:
         logger.info(f"Found {len(arc_spaces)} spaces with pinned tabs")
         return arc_spaces
 
-    def _extract_essential_tabs_distributed(self, data: Dict, spaces_info: Dict) -> Dict[str, List[ArcPinnedTab]]:
+    def _extract_essential_tabs_distributed(self, data: dict, spaces_info: dict) -> dict[str, list[ArcPinnedTab]]:
         """Extract Essential tabs from topApps containers and distribute them to appropriate spaces.
 
         Essential tabs in Arc appear at the top with large icons and are stored
@@ -532,7 +532,7 @@ class ArcPinnedTabExtractor:
 
         return essential_tabs_by_space
 
-    def _assign_essential_tab_to_space(self, children_ids: List[str], items_lookup: Dict, spaces_info: Dict) -> str:
+    def _assign_essential_tab_to_space(self, children_ids: list[str], items_lookup: dict, spaces_info: dict) -> str:
         """Intelligently assign orphaned essential tabs to spaces based on URL patterns and content."""
 
         if not children_ids:
@@ -558,7 +558,7 @@ class ArcPinnedTabExtractor:
                     debug_content.append(f"Title: {title}")
 
         # Debug: Show what content we're analyzing
-        logger.info(f"    🔍 Analyzing orphaned essential tabs content:")
+        logger.info("    🔍 Analyzing orphaned essential tabs content:")
         for content in debug_content[:5]:  # Show first 5 entries
             logger.info(f"      - {content}")
         if len(debug_content) > 5:
@@ -616,7 +616,7 @@ class ArcPinnedTabExtractor:
         # No intelligent match found
         return "orphaned"
 
-    def _item_belongs_to_space(self, item_id: str, target_space_id: str, items_lookup: Dict, data: Dict) -> bool:
+    def _item_belongs_to_space(self, item_id: str, target_space_id: str, items_lookup: dict, data: dict) -> bool:
         """Check if an item belongs to a specific space."""
         item_data = items_lookup.get(item_id, {})
         parent_id = item_data.get('parentID')
@@ -637,7 +637,7 @@ class ArcPinnedTabExtractor:
 
         return False
 
-    def _get_space_container_ids(self, space_id: str, data: Dict) -> List[str]:
+    def _get_space_container_ids(self, space_id: str, data: dict) -> list[str]:
         """Get the container IDs for a specific space."""
         containers = data.get('sidebar', {}).get('containers', [])
         if len(containers) > 1 and 'spaces' in containers[1]:
@@ -655,7 +655,7 @@ class ArcPinnedTabExtractor:
         logger.debug(f"      ⚠️  No container IDs found for space {space_id}")
         return []
 
-    def _is_pinned_content(self, item_id: str, items_lookup: Dict, data: Dict) -> bool:
+    def _is_pinned_content(self, item_id: str, items_lookup: dict, data: dict) -> bool:
         """Check if an item is pinned content (not in unpinned container)."""
         item_data = items_lookup.get(item_id, {})
         parent_id = item_data.get('parentID')
@@ -672,7 +672,7 @@ class ArcPinnedTabExtractor:
         # We check the hierarchy to see if it eventually leads to an "unpinned" container
         return not self._is_in_unpinned_container(item_id, items_lookup, data)
 
-    def _is_in_unpinned_container(self, item_id: str, items_lookup: Dict, data: Dict) -> bool:
+    def _is_in_unpinned_container(self, item_id: str, items_lookup: dict, data: dict) -> bool:
         """Check if an item is in an unpinned container hierarchy."""
         item_data = items_lookup.get(item_id, {})
         parent_id = item_data.get('parentID')
@@ -711,7 +711,7 @@ class ArcPinnedTabExtractor:
 
         return False
 
-    def _get_space_display_order(self, space_id: str, items_lookup: Dict, data: Dict) -> List[str]:
+    def _get_space_display_order(self, space_id: str, items_lookup: dict, data: dict) -> list[str]:
         """Get the display order of items in a space using container childrenIds.
         
         The containerIDs array contains markers ('pinned', 'unpinned') followed by
@@ -720,7 +720,7 @@ class ArcPinnedTabExtractor:
         """
         space_container_ids = self._get_space_container_ids(space_id, data)
         if not space_container_ids:
-            logger.debug(f"      ⚠️  No container IDs, returning empty display order")
+            logger.debug("      ⚠️  No container IDs, returning empty display order")
             return []
 
         containers = data.get('sidebar', {}).get('containers', [])
@@ -758,7 +758,7 @@ class ArcPinnedTabExtractor:
 
         return []
 
-    def _get_unpinned_tab_order(self, space_id: str, items_lookup: Dict, data: Dict) -> List[str]:
+    def _get_unpinned_tab_order(self, space_id: str, items_lookup: dict, data: dict) -> list[str]:
         """Get the display order of unpinned (open) tabs in a space.
 
         Finds the container UUID immediately following the 'unpinned' marker.
@@ -792,7 +792,7 @@ class ArcPinnedTabExtractor:
 
         return []
 
-    def _get_folder_path_local(self, parent_id: str, items_lookup: Dict, space_id: str, data: Dict) -> List[str]:
+    def _get_folder_path_local(self, parent_id: str, items_lookup: dict, space_id: str, data: dict) -> list[str]:
         """Build the folder path from space root to the item."""
         if not parent_id:
             return []
@@ -811,7 +811,7 @@ class ArcPinnedTabExtractor:
         # If parent is not a folder, continue up the hierarchy
         return self._get_folder_path_local(parent_data.get('parentID'), items_lookup, space_id, data)
 
-    def _parse_sidebar_data(self, data: Dict) -> List[ArcSpace]:
+    def _parse_sidebar_data(self, data: dict) -> list[ArcSpace]:
         """Parse the complete sidebar data structure from sync data."""
         arc_spaces = []
 
@@ -869,7 +869,7 @@ class ArcPinnedTabExtractor:
         logger.info(f"Found {len(arc_spaces)} spaces with pinned tabs")
         return arc_spaces
 
-    def _find_pinned_container(self, data: Dict, space_id: str) -> Optional[str]:
+    def _find_pinned_container(self, data: dict, space_id: str) -> str | None:
         """Find the pinned container ID for a given space."""
         # Look in containerModels for this space
         container_models = data.get('firebaseSyncState', {}).get('syncData', {}).get('containerModels', [])
@@ -895,7 +895,7 @@ class ArcPinnedTabExtractor:
 
         return None
 
-    def _extract_space_content(self, data: Dict, space_id: str, space_name: str, pinned_container_id: str) -> ArcSpace:
+    def _extract_space_content(self, data: dict, space_id: str, space_name: str, pinned_container_id: str) -> ArcSpace:
         """Extract tabs and folders for a specific space."""
         sidebar_items = data.get('firebaseSyncState', {}).get('syncData', {}).get('items', [])
 
@@ -964,7 +964,7 @@ class ArcPinnedTabExtractor:
         logger.info(f"  ✅ {space_name}: {len(pinned_tabs)} pinned tabs, {len(folders)} folders")
         return ArcSpace(space_id, space_name, pinned_tabs, folders, None, None)
 
-    def _is_in_pinned_container(self, item_id: str, pinned_container_id: str, items_lookup: Dict) -> bool:
+    def _is_in_pinned_container(self, item_id: str, pinned_container_id: str, items_lookup: dict) -> bool:
         """Check if an item is within the pinned container hierarchy."""
         if item_id == pinned_container_id:
             return True
@@ -982,7 +982,7 @@ class ArcPinnedTabExtractor:
 
         return False
 
-    def _get_folder_path(self, parent_id: str, items_lookup: Dict, pinned_container_id: str) -> List[str]:
+    def _get_folder_path(self, parent_id: str, items_lookup: dict, pinned_container_id: str) -> list[str]:
         """Build the folder path from the pinned container to the item."""
         if not parent_id or parent_id == pinned_container_id:
             return []
@@ -996,11 +996,11 @@ class ArcPinnedTabExtractor:
 
         return grandparent_path + [parent_title]
 
-    def export_to_json(self, arc_spaces: List[ArcSpace], output_file: Path) -> bool:
+    def export_to_json(self, arc_spaces: list[ArcSpace], output_file: Path) -> bool:
         """Export extracted pinned tabs to JSON file."""
         try:
             export_data = {
-                'export_timestamp': datetime.now(timezone.utc).isoformat(),
+                'export_timestamp': datetime.now(UTC).isoformat(),
                 'total_spaces': len(arc_spaces),
                 'spaces': []
             }
@@ -1030,7 +1030,7 @@ class ArcPinnedTabExtractor:
             logger.error(f"Failed to export to JSON: {e}")
             return False
 
-    def get_extraction_summary(self, arc_spaces: List[ArcSpace]) -> Dict:
+    def get_extraction_summary(self, arc_spaces: list[ArcSpace]) -> dict:
         """Generate summary statistics for extraction."""
         total_pinned = sum(len(space.pinned_tabs) for space in arc_spaces)
         total_open = sum(len(space.open_tabs) for space in arc_spaces)
@@ -1072,13 +1072,13 @@ def main():
     if success:
         summary = extractor.get_extraction_summary(arc_spaces)
 
-        print(f"\n📊 Extraction Summary:")
+        print("\n📊 Extraction Summary:")
         print(f"  Total spaces: {summary['total_spaces']}")
         print(f"  Total pinned tabs: {summary['total_pinned_tabs']}")
         print(f"  Total folders: {summary['total_folders']}")
         print(f"\n💾 Exported to: {output_file.absolute()}")
 
-        print(f"\n📋 Per-space breakdown:")
+        print("\n📋 Per-space breakdown:")
         for space_info in summary['spaces_summary']:
             print(f"  • {space_info['name']}: {space_info['pinned_tabs']} tabs, {space_info['folders']} folders")
 

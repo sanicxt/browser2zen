@@ -10,14 +10,14 @@ Format: mozlz4 (8-byte magic + 4-byte LE size + lz4 block compressed JSON)
 """
 
 import json
-import struct
-import uuid
-import time
-import shutil
 import logging
+import shutil
+import struct
+import time
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
 
 try:
     import lz4.block
@@ -141,7 +141,7 @@ class ZenSessionsImporter:
         return space
 
     def _build_tab(self, tab_data: dict, workspace_uuid: str,
-                   index: int, folder_id: Optional[str] = None) -> dict:
+                   index: int, folder_id: str | None = None) -> dict:
         url = tab_data.get("url", "")
         title = tab_data.get("title", "")
         is_essential = tab_data.get("is_essential", False)
@@ -211,7 +211,7 @@ class ZenSessionsImporter:
         }
 
     def _build_folder(self, folder_data: dict, workspace_uuid: str,
-                      parent_folder_id: Optional[str] = None) -> dict:
+                      parent_folder_id: str | None = None) -> dict:
         return {
             "pinned": True,
             "splitViewGroup": False,
@@ -229,7 +229,7 @@ class ZenSessionsImporter:
     # --- Core import logic ---
 
     def _process_space(self, space_data: dict,
-                       user_context_id: int = 0) -> Tuple[dict, List[dict], List[dict]]:
+                       user_context_id: int = 0) -> tuple[dict, list[dict], list[dict]]:
         """Process a single Arc space into Zen space, folders, and tabs
         (pinned + open).
 
@@ -243,8 +243,8 @@ class ZenSessionsImporter:
 
         # Build folders with hierarchy
         arc_folders = space_data.get("folders", [])
-        arc_folder_id_to_zen_id: Dict[str, str] = {}
-        zen_folders: List[dict] = []
+        arc_folder_id_to_zen_id: dict[str, str] = {}
+        zen_folders: list[dict] = []
 
         # Sort folders by index to preserve Arc ordering
         sorted_folders = sorted(arc_folders, key=lambda f: f.get("index", 0))
@@ -280,7 +280,7 @@ class ZenSessionsImporter:
 
         # Build tabs preserving Arc order
         pinned_tabs = space_data.get("pinned_tabs", [])
-        zen_tabs: List[dict] = []
+        zen_tabs: list[dict] = []
 
         for i, tab_data in enumerate(pinned_tabs):
             url = tab_data.get("url", "")
@@ -345,8 +345,8 @@ class ZenSessionsImporter:
 
         return space, zen_folders, zen_tabs
 
-    def _merge_with_existing(self, existing: dict, new_spaces: List[dict],
-                             new_tabs: List[dict], new_folders: List[dict]) -> dict:
+    def _merge_with_existing(self, existing: dict, new_spaces: list[dict],
+                             new_tabs: list[dict], new_folders: list[dict]) -> dict:
         """Merge imported data with existing zen-sessions data."""
         existing_space_names = {s["name"] for s in existing.get("spaces", [])}
 

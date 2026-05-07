@@ -1,0 +1,124 @@
+{
+  "version": 4,
+  "sidebar": {
+    "containers": [
+      {},
+      {
+        "spaces": [
+          "11111111-1111-1111-1111-111111111111",
+          {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "title": "Test Space",
+            "containerIDs": [
+              "pinned",
+              "22222222-2222-2222-2222-222222222222",
+              "unpinned",
+              "33333333-3333-3333-3333-333333333333"
+            ],
+            "customInfo": {
+              "iconType": {
+                "emoji_v2": "\u2728"
+              }
+            }
+          }
+        ],
+        "items": [
+          "22222222-2222-2222-2222-222222222222",
+          {
+            "id": "22222222-2222-2222-2222-222222222222",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "11111111-1111-1111-1111-111111111111"
+                  }
+                }
+              }
+            },
+            "childrenIds": [
+              "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+              "ffffffff-ffff-ffff-ffff-ffffffffffff"
+            ]
+          },
+          "33333333-3333-3333-3333-333333333333",
+          {
+            "id": "33333333-3333-3333-3333-333333333333",
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "11111111-1111-1111-1111-111111111111"
+                  }
+                }
+              }
+            },
+            "childrenIds": []
+          },
+          "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+          {
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1",
+            "title": "Example",
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/"
+              }
+            },
+            "parentID": "22222222-2222-2222-2222-222222222222",
+            "createdAt": 700000000
+          },
+          "ffffffff-ffff-ffff-ffff-ffffffffffff",
+          {
+            "id": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "title": "Test Folder",
+            "data": {
+              "list": {}
+            },
+            "parentID": "22222222-2222-2222-2222-222222222222",
+            "childrenIds": [
+              "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2"
+            ],
+            "createdAt": 699000000
+          },
+          "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2",
+          {
+            "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2",
+            "title": "Mozilla",
+            "data": {
+              "tab": {
+                "savedURL": "https://mozilla.org/"
+              }
+            },
+            "parentID": "ffffffff-ffff-ffff-ffff-ffffffffffff",
+            "createdAt": 700000001
+          }
+        ]
+      }
+    ]
+  },
+  "firebaseSyncState": {
+    "syncData": {
+      "spaceModels": [
+        "11111111-1111-1111-1111-111111111111",
+        {
+          "value": {
+            "title": "Test Space",
+            "customInfo": {
+              "iconType": {
+                "emoji_v2": "\u2728"
+              },
+              "windowTheme": {
+                "primaryColorPalette": {
+                  "midTone": {
+                    "red": 0.5,
+                    "green": 0.4,
+                    "blue": 0.9
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

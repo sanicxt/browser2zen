@@ -1,0 +1,133 @@
+name: Bug report
+description: Something didn't migrate, crashed, or otherwise misbehaved.
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Before submitting, please
+        check that the issue isn't already filed under
+        [open issues](https://github.com/tarikbc/browser2zen/issues).
+
+        If something looks wrong in your Zen profile after running browser2zen,
+        the **Backups screen** inside the app can roll back any individual
+        file the migration touched. Every step writes a timestamped backup
+        beside your Zen profile. You don't have to live with a broken state.
+
+  - type: dropdown
+    id: source-browser
+    attributes:
+      label: Source browser
+      description: Which browser were you migrating from?
+      options:
+        - Arc
+        - Chrome
+        - Microsoft Edge
+        - Brave
+        - Firefox
+        - Safari
+        - Other (please describe in the steps below)
+    validations:
+      required: true
+
+  - type: input
+    id: source-version
+    attributes:
+      label: Source-browser version
+      description: Found via the source browser's About dialog.
+      placeholder: "e.g. Arc 1.82.0, Chrome 133.0.6943.99, Firefox 136.0"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Windows 11
+        - Windows 10
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      placeholder: "e.g. macOS 15.3 Sequoia, Windows 11 24H2, Ubuntu 24.04"
+
+  - type: input
+    id: browser2zen-version
+    attributes:
+      label: browser2zen version
+      description: Bottom of the welcome screen, or the file name of the .dmg/.zip you downloaded.
+      placeholder: "e.g. 1.0.1"
+    validations:
+      required: true
+
+  - type: input
+    id: zen-version
+    attributes:
+      label: Zen Browser version
+      description: Found via Zen's About dialog.
+      placeholder: "e.g. 1.10.3"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: failed-step
+    attributes:
+      label: Which step failed?
+      description: The progress screen labels each step. Which one errored, or got stuck?
+      options:
+        - Detect (couldn't find browser data)
+        - Preview (counts looked wrong)
+        - Reading source data (extract step)
+        - Creating containers
+        - Importing spaces / pinned tabs / folders (sessions step)
+        - Backing up as bookmarks
+        - Importing favicons
+        - Importing browsing history
+        - Importing cookies
+        - Finalizing
+        - The app crashed / wouldn't launch
+        - Something else (describe below)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the problem.
+      placeholder: "I clicked Start migration. The Cookies step failed with..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "I expected my Gmail session to carry over."
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output (if any)
+      description: |
+        If the app showed an error, please paste the relevant log lines.
+        On a build, click the **View log** disclosure on the progress screen.
+        Running from source: `python -m app --debug` prints to the terminal.
+      render: shell
+
+  - type: checkboxes
+    id: backups
+    attributes:
+      label: Backups
+      description: Just confirming.
+      options:
+        - label: I checked the Backups screen and saw the timestamped files (or know I can roll back from there).
+          required: false

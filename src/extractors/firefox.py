@@ -60,7 +60,7 @@ _ROOT_IDS = {
 }
 
 
-def _firefox_profiles_root() -> Optional[Path]:
+def _firefox_profiles_root() -> Path | None:
     home = Path.home()
     if sys.platform == "darwin":
         return home / "Library/Application Support/Firefox"
@@ -279,7 +279,7 @@ class FirefoxExtractor(BrowserExtractor):
         parent_db_id: int,
         children: dict[int, list[sqlite3.Row]],
         folder_path: list[str],
-        parent_record_id: Optional[str],
+        parent_record_id: str | None,
         space_id: str,
         tabs_out: list[TabRecord],
         folders_out: list[FolderRecord],

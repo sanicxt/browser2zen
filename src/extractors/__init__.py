@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Type
-
 from .arc import ArcExtractor
 from .base import (
     BrowserExtractor,
@@ -20,7 +18,7 @@ from .firefox import FirefoxExtractor
 from .safari import SafariExtractor
 
 # Order matters: this is the order the source picker presents them.
-EXTRACTORS: tuple[Type[BrowserExtractor], ...] = (
+EXTRACTORS: tuple[type[BrowserExtractor], ...] = (
     ArcExtractor,
     ChromeExtractor,
     EdgeExtractor,
@@ -30,7 +28,7 @@ EXTRACTORS: tuple[Type[BrowserExtractor], ...] = (
 )
 
 
-def by_name(name: str) -> Type[BrowserExtractor]:
+def by_name(name: str) -> type[BrowserExtractor]:
     for cls in EXTRACTORS:
         if cls.name == name:
             return cls

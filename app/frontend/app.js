@@ -67,6 +67,7 @@ const state = {
     includeOpenTabs: true,
     includeHistory: false,
     includeCookies: false,
+    excludedSpaces: [],
   },
   steps: [],
   stepLabels: {},
@@ -488,7 +489,24 @@ function makeStat(n, lbl) {
 
 function makeSpaceRow(s) {
   const hasColor = Array.isArray(s.color) && s.color.length === 3;
-  const row = el("div", {class: hasColor ? "space-row" : "space-row no-color"}, [
+  const excluded = (state.options.excludedSpaces || []).includes(s.name);
+
+  const checkbox = el("input", {
+    type: "checkbox",
+    class: "space-check",
+    checked: excluded ? null : "checked",
+  });
+  checkbox.checked = !excluded;
+  checkbox.addEventListener("click", (ev) => ev.stopPropagation());
+  checkbox.addEventListener("change", () => toggleSpaceExcluded(s.name, !checkbox.checked, row));
+
+  const row = el("div", {
+    class: hasColor ? "space-row" : "space-row no-color",
+    role: "button",
+    tabindex: "0",
+    "data-included": excluded ? "false" : "true",
+  }, [
+    checkbox,
     el("div", {class: "icon", text: s.icon || "·"}),
     el("div", {class: "text"}, [
       el("div", {class: "name", text: s.name}),
@@ -498,6 +516,20 @@ function makeSpaceRow(s) {
     ]),
     el("div", {class: "count", text: `${s.pinnedCount} tabs`}),
   ]);
+
+  // Whole-card click toggles the checkbox so the entire row is the target.
+  row.addEventListener("click", () => {
+    checkbox.checked = !checkbox.checked;
+    toggleSpaceExcluded(s.name, !checkbox.checked, row);
+  });
+  row.addEventListener("keydown", (ev) => {
+    if (ev.key === " " || ev.key === "Enter") {
+      ev.preventDefault();
+      checkbox.checked = !checkbox.checked;
+      toggleSpaceExcluded(s.name, !checkbox.checked, row);
+    }
+  });
+
   if (hasColor) {
     const [r, g, b] = s.color;
     row.style.setProperty("--space-tint-r", r);
@@ -505,6 +537,15 @@ function makeSpaceRow(s) {
     row.style.setProperty("--space-tint-b", b);
   }
   return row;
+}
+
+function toggleSpaceExcluded(name, isExcluded, row) {
+  if (!Array.isArray(state.options.excludedSpaces)) state.options.excludedSpaces = [];
+  const list = state.options.excludedSpaces;
+  const idx = list.indexOf(name);
+  if (isExcluded && idx === -1) list.push(name);
+  if (!isExcluded && idx !== -1) list.splice(idx, 1);
+  if (row) row.dataset.included = isExcluded ? "false" : "true";
 }
 
 function makeToggle(key, label, desc) {
@@ -1011,6 +1052,9 @@ function currentOptionsJson() {
   return JSON.stringify({
     zenProfilePath: state.selectedZenProfile,
     spaceFilter: null,
+    excludedSpaces: Array.isArray(state.options.excludedSpaces)
+      ? state.options.excludedSpaces.slice()
+      : [],
     foldersCollapsed: state.options.foldersCollapsed,
     includeWorkspaces: state.options.includeWorkspaces,
     includePinnedTabs: state.options.includePinnedTabs,

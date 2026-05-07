@@ -26,8 +26,9 @@ import shutil
 import sqlite3
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
@@ -103,17 +104,17 @@ class FaviconImporter:
         self,
         zen_profile_path: Path,
         dry_run: bool = False,
-        favicon_dbs: Optional[list[Path]] = None,
+        favicon_dbs: list[Path] | None = None,
     ):
         # ``favicon_dbs`` lets the multi-source orchestrator inject paths
         # from any Chromium-format browser. None = original Arc-only lookup.
         self.zen_profile = Path(zen_profile_path)
         self.zen_favicons_db = self.zen_profile / "favicons.sqlite"
         self.dry_run = dry_run
-        self._injected_dbs: Optional[list[Path]] = (
+        self._injected_dbs: list[Path] | None = (
             [Path(p) for p in favicon_dbs] if favicon_dbs is not None else None
         )
-        self._tempdir: Optional[Path] = None
+        self._tempdir: Path | None = None
 
     def _favicon_dbs(self) -> list[Path]:
         """Locate every source-browser profile's Favicons SQLite file."""
@@ -159,7 +160,7 @@ class FaviconImporter:
         return url
 
     @staticmethod
-    def _origin(url: str) -> Optional[str]:
+    def _origin(url: str) -> str | None:
         try:
             p = urlparse(url)
         except ValueError:
@@ -239,7 +240,7 @@ class FaviconImporter:
         page_urls: set[str],
         normalized_to_original: dict[str, str],
         origin_to_original: dict[str, str],
-    ) -> Optional[str]:
+    ) -> str | None:
         if arc_page in page_urls:
             return arc_page
         norm = self._normalize(arc_page)
@@ -341,7 +342,7 @@ class FaviconImporter:
         return result
 
     @staticmethod
-    def _extract_tab_url(tab: dict) -> Optional[str]:
+    def _extract_tab_url(tab: dict) -> str | None:
         """Pull the active URL out of a session tab entry."""
         entries = tab.get("entries") or []
         if entries:

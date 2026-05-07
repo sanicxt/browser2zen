@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 # Reuse Firefox URL hash from the favicon importer so moz_places.url_hash matches.
 from zen_favicon_importer import hash_page_url
 
-
 # Chrome PageTransition enum (chrome/common/page_transition_types.h) → Firefox visit_type.
 # Firefox values: 1=link, 2=typed, 3=bookmark, 4=embed, 5=redirect_perm,
 #                 6=redirect_temp, 7=download, 8=framed_link, 9=reload.
@@ -53,7 +52,7 @@ _CHROMIUM_REDIRECT_TEMPORARY = 0x04000000
 _WEBKIT_EPOCH_OFFSET_US = 11_644_473_600_000_000
 
 
-def _chrome_to_unix_us(chrome_us: Optional[int]) -> int:
+def _chrome_to_unix_us(chrome_us: int | None) -> int:
     if not chrome_us:
         return 0
     val = chrome_us - _WEBKIT_EPOCH_OFFSET_US
@@ -83,7 +82,7 @@ class HistoryImporter:
         self,
         zen_profile: Path,
         dry_run: bool = False,
-        history_dbs: Optional[list[Path]] = None,
+        history_dbs: list[Path] | None = None,
     ):
         # ``history_dbs`` lets the multi-source orchestrator inject paths
         # from any Chromium-format browser (Chrome/Edge/Brave/Arc). When
@@ -92,10 +91,10 @@ class HistoryImporter:
         self.zen_profile = Path(zen_profile)
         self.places_db = self.zen_profile / "places.sqlite"
         self.dry_run = dry_run
-        self._injected_dbs: Optional[list[Path]] = (
+        self._injected_dbs: list[Path] | None = (
             [Path(p) for p in history_dbs] if history_dbs is not None else None
         )
-        self._tempdir: Optional[Path] = None
+        self._tempdir: Path | None = None
 
     def _history_dbs(self) -> list[Path]:
         if self._injected_dbs is not None:
@@ -133,7 +132,7 @@ class HistoryImporter:
             shutil.rmtree(self._tempdir, ignore_errors=True)
             self._tempdir = None
 
-    def import_history(self, since_days: Optional[int] = None) -> dict:
+    def import_history(self, since_days: int | None = None) -> dict:
         """Import Chromium-format history into places.sqlite.
 
         since_days: only import visits newer than this many days. None = all.

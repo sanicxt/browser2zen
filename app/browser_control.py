@@ -74,7 +74,7 @@ def _taskkill(image_name: str, force: bool) -> bool:
     return r.returncode in (0, 128)
 
 
-def _windows_zen_exe() -> Optional[Path]:
+def _windows_zen_exe() -> Path | None:
     """Find ``zen.exe`` (or ``zen-bin.exe``) under the active Zen profile.
 
     Zen on Windows installs alongside the user profile; the profile's

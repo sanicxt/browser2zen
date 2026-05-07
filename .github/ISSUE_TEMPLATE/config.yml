@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: r/zen_browser
+    url: https://www.reddit.com/r/zen_browser/
+    about: General Zen Browser discussion. browser2zen is a third-party tool.
+  - name: Zen Browser
+    url: https://zen-browser.app/
+    about: The browser this tool migrates into. Zen-side issues belong in their tracker.

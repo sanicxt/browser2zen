@@ -18,9 +18,10 @@ import logging
 import sys
 import time
 import traceback
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Iterator, Optional, Tuple
+from typing import Optional
 
 # Make ``src/`` importable when running from the repo root or as a packaged app.
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -29,15 +30,16 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 # Existing importer modules (unchanged).
-from zen_space_importer import ZenSpaceImporter, ZenProfile as _SrcZenProfile  # noqa: E402
-from zen_sessions_importer import ZenSessionsImporter                    # noqa: E402
-from zen_bookmark_importer import ZenBookmarkImporter                    # noqa: E402
-from zen_favicon_importer import FaviconImporter, _iter_pinned_urls      # noqa: E402
-from chromium_history_importer import HistoryImporter                          # noqa: E402
 from chromium_cookies_importer import CookiesImporter, _discover_user_containers  # noqa: E402
+from chromium_history_importer import HistoryImporter  # noqa: E402
 
 # Source-browser adapters.
-from extractors import ArcExtractor, BrowserExtractor                    # noqa: E402
+from extractors import ArcExtractor, BrowserExtractor  # noqa: E402
+from zen_bookmark_importer import ZenBookmarkImporter  # noqa: E402
+from zen_favicon_importer import FaviconImporter, _iter_pinned_urls  # noqa: E402
+from zen_sessions_importer import ZenSessionsImporter  # noqa: E402
+from zen_space_importer import ZenProfile as _SrcZenProfile
+from zen_space_importer import ZenSpaceImporter  # noqa: E402
 
 from .env_check import EnvReport, ZenProfile, check_environment
 from .progress_bus import ProgressBus, ProgressEvent
@@ -50,7 +52,7 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class SpaceSummary:
     name: str
-    icon: Optional[str]
+    icon: str | None
     pinned_count: int
     open_count: int
     folder_count: int
@@ -58,7 +60,7 @@ class SpaceSummary:
     # Arc midTone colour as integer RGB (0-255) so the frontend can tint the
     # space card background to match the Arc workspace. ``None`` when the
     # space has no theme set.
-    color: Optional[Tuple[int, int, int]] = None
+    color: tuple[int, int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,8 @@ class PreviewReport:
 @dataclass
 class MigrationOptions:
     zen_profile_path: Path
-    space_filter: Optional[str] = None    # name kept for backwards compat; matches against any source's spaces
+    space_filter: str | None = None    # substring filter for power-user CLI
+    excluded_spaces: list[str] = field(default_factory=list)  # exact-name set for the Preview-screen checkboxes
     folders_collapsed: bool = True
     include_workspaces: bool = True
     include_pinned_tabs: bool = True
@@ -118,10 +121,42 @@ def _step_label(step: str, source_display: str) -> str:
     return STEP_LABELS.get(step, step).format(source=source_display)
 
 
+# User-facing messages mapped from the structured error codes the
+# Chromium cookie importer surfaces. Kept at module scope so the
+# orchestrator's `_run` method stays focused on flow.
+_COOKIE_ERROR_MESSAGES = {
+    # macOS
+    "keychain_denied":
+        "macOS Keychain access was denied; cookies skipped.",
+    # Windows DPAPI / Chromium-family
+    "chromium_local_state_missing":
+        "Arc has not been launched on this Windows account yet; cookies skipped.",
+    "chromium_no_encrypted_key":
+        "Arc has no cookie encryption key on this account; cookies skipped.",
+    "chromium_appbound_encryption":
+        "Arc cookies use newer (v20) app-bound encryption; cookies skipped. "
+        "Sign in fresh on imported sites.",
+    "chromium_unknown_key_prefix":
+        "Arc Local State key has an unrecognised prefix; cookies skipped.",
+    "chromium_unexpected_key_length":
+        "Arc DPAPI key has unexpected length; cookies skipped.",
+    "dpapi_wrong_user":
+        "Cookies were encrypted on a different Windows account and can't be "
+        "migrated. Sign in fresh on imported sites.",
+    "dpapi_failed":
+        "Windows DPAPI rejected the cookie key; cookies skipped.",
+    # Both
+    "unsupported_platform":
+        "Cookie import only supports macOS and Windows.",
+    "cookies_db_missing":
+        "Zen cookies.sqlite was not found.",
+}
+
+
 # ------------------------------------------------------------------ orchestrator
 
 class MigrationOrchestrator:
-    def __init__(self, source: Optional[BrowserExtractor] = None) -> None:
+    def __init__(self, source: BrowserExtractor | None = None) -> None:
         self.bus = ProgressBus()
         # Default source = Arc so existing callers (CLI/Arc-only frontend)
         # don't need to change.
@@ -150,7 +185,7 @@ class MigrationOrchestrator:
             open_count = len(s.open_tabs or [])
             essential = sum(1 for t in (s.pinned_tabs or []) if t.is_essential)
             folder_count = len(s.folders or [])
-            color_rgb: Optional[Tuple[int, int, int]] = None
+            color_rgb: tuple[int, int, int] | None = None
             if s.color and all(k in s.color for k in ("r", "g", "b")):
                 color_rgb = (
                     int(round(s.color["r"] * 255)),
@@ -268,8 +303,8 @@ class MigrationOrchestrator:
         self._emit({"kind": "step_start", "step": step,
                     "message": _step_label(step, self.source.display_name)})
 
-    def _done_step(self, step: str, summary: Optional[dict] = None,
-                   message: Optional[str] = None) -> None:
+    def _done_step(self, step: str, summary: dict | None = None,
+                   message: str | None = None) -> None:
         ev: ProgressEvent = {"kind": "step_done", "step": step,
                              "message": message or
                                         f"{_step_label(step, self.source.display_name)} done"}
@@ -302,6 +337,20 @@ class MigrationOrchestrator:
             if not export.spaces:
                 self._error_step("extract", RuntimeError(
                     f"No {self.source.display_name} space matches '{opts.space_filter}'."
+                ))
+                yield from self._drain_yield()
+                return
+
+        # Drop spaces the user unchecked on the Preview screen. The check is
+        # exact-name and case-sensitive because that's what the Preview
+        # checkboxes send; the substring ``space_filter`` above is the
+        # power-user CLI knob and runs first.
+        if opts.excluded_spaces:
+            excluded = set(opts.excluded_spaces)
+            export.spaces = [s for s in export.spaces if s.space_name not in excluded]
+            if not export.spaces:
+                self._error_step("extract", RuntimeError(
+                    "All spaces were excluded. Pick at least one space to migrate."
                 ))
                 yield from self._drain_yield()
                 return
@@ -431,21 +480,7 @@ class MigrationOrchestrator:
                 summary = c.import_cookies()
                 if summary.get("error"):
                     err = summary["error"]
-                    msg = {
-                        # macOS
-                        "keychain_denied":           "macOS Keychain access was denied; cookies skipped.",
-                        # Windows
-                        "chromium_local_state_missing":   "Arc has not been launched on this Windows account yet; cookies skipped.",
-                        "chromium_no_encrypted_key":      "Arc has no cookie encryption key on this account; cookies skipped.",
-                        "chromium_appbound_encryption":   "Arc cookies use newer (v20) app-bound encryption; cookies skipped. Sign in fresh on imported sites.",
-                        "chromium_unknown_key_prefix":    "Arc Local State key has an unrecognised prefix; cookies skipped.",
-                        "chromium_unexpected_key_length": "Arc DPAPI key has unexpected length; cookies skipped.",
-                        "dpapi_wrong_user":          "Cookies were encrypted on a different Windows account and can't be migrated. Sign in fresh on imported sites.",
-                        "dpapi_failed":              "Windows DPAPI rejected the cookie key; cookies skipped.",
-                        # Both
-                        "unsupported_platform":      "Cookie import only supports macOS and Windows.",
-                        "cookies_db_missing":        "Zen cookies.sqlite was not found.",
-                    }.get(err, f"Cookie import failed: {err}")
+                    msg = _COOKIE_ERROR_MESSAGES.get(err, f"Cookie import failed: {err}")
                     self._error_step("cookies", RuntimeError(msg))
                 else:
                     self._done_step("cookies", summary=summary)
@@ -465,8 +500,7 @@ class MigrationOrchestrator:
         yield from self._drain_yield()
 
     def _drain_yield(self) -> Iterator[ProgressEvent]:
-        for ev in self.bus.drain():
-            yield ev
+        yield from self.bus.drain()
 
     # ---- backups + utility for the Done screen --------------------------
 

@@ -40,8 +40,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Callable, Iterable, Optional, Tuple
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -49,14 +50,14 @@ logger = logging.getLogger(__name__)
 _WEBKIT_EPOCH_OFFSET_US = 11_644_473_600_000_000
 
 
-def _chrome_to_unix_us(chrome_us: Optional[int]) -> int:
+def _chrome_to_unix_us(chrome_us: int | None) -> int:
     if not chrome_us:
         return 0
     val = chrome_us - _WEBKIT_EPOCH_OFFSET_US
     return val if val > 0 else 0
 
 
-def _read_keychain_password(service: str = "Arc Safe Storage", account: str = "Arc") -> Optional[str]:
+def _read_keychain_password(service: str = "Arc Safe Storage", account: str = "Arc") -> str | None:
     """Fetch the per-app Chromium safe-storage key from macOS Keychain.
 
     Arc registers the entry with svce="Arc Safe Storage" and acct="Arc".
@@ -84,8 +85,8 @@ def _read_keychain_password(service: str = "Arc Safe Storage", account: str = "A
 
 def _derive_aes_key_macos(password: str) -> bytes:
     """Chromium on macOS: PBKDF2-HMAC-SHA1, salt='saltysalt', iterations=1003, keylen=16."""
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
     from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA1(),
@@ -96,7 +97,7 @@ def _derive_aes_key_macos(password: str) -> bytes:
     return kdf.derive(password.encode("utf-8"))
 
 
-def _decrypt_v10_cbc(blob: bytes, key: bytes) -> Optional[bytes]:
+def _decrypt_v10_cbc(blob: bytes, key: bytes) -> bytes | None:
     """macOS path. Strip 'v10' magic, AES-128-CBC decrypt with all-spaces IV, PKCS7 unpad."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
@@ -184,7 +185,7 @@ def _crypt_unprotect_data(blob: bytes) -> bytes:
         kernel32.LocalFree(out_blob.pbData)
 
 
-def _read_local_state_key_windows(local_state_paths: Optional[list[Path]] = None) -> bytes:
+def _read_local_state_key_windows(local_state_paths: list[Path] | None = None) -> bytes:
     """Read a Chromium browser's ``Local State`` and unwrap the master key.
 
     ``local_state_paths`` is optional and lets callers point at any
@@ -234,15 +235,15 @@ def _read_local_state_key_windows(local_state_paths: Optional[list[Path]] = None
     return key
 
 
-def _decrypt_v10_gcm(blob: bytes, key: bytes) -> Optional[bytes]:
+def _decrypt_v10_gcm(blob: bytes, key: bytes) -> bytes | None:
     """Windows path. Strip 'v10' magic, AES-256-GCM decrypt with the embedded nonce.
 
     Layout: ``b"v10" + nonce[12] + ciphertext + tag[16]``.
     Returns the plaintext or ``None`` on prefix/format mismatch. The
     caller swallows individual decrypt failures and counts them.
     """
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
     from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     if not blob.startswith(b"v10") or len(blob) < 3 + 12 + 16:
         return None
@@ -316,11 +317,11 @@ class CookiesImporter:
         self,
         zen_profile: Path,
         dry_run: bool = False,
-        container_ids: Optional[list[int]] = None,
-        cookie_dbs: Optional[list[Path]] = None,
+        container_ids: list[int] | None = None,
+        cookie_dbs: list[Path] | None = None,
         keychain_service: str = "Arc Safe Storage",
         keychain_account: str = "Arc",
-        local_state_paths: Optional[list[Path]] = None,
+        local_state_paths: list[Path] | None = None,
     ):
         # ``cookie_dbs`` injects per-browser cookie SQLite paths; the
         # other three knobs let any Chromium browser (Chrome/Edge/Brave)
@@ -329,15 +330,15 @@ class CookiesImporter:
         self.zen_cookies = self.zen_profile / "cookies.sqlite"
         self.dry_run = dry_run
         self.container_ids = container_ids or []
-        self._injected_dbs: Optional[list[Path]] = (
+        self._injected_dbs: list[Path] | None = (
             [Path(p) for p in cookie_dbs] if cookie_dbs is not None else None
         )
         self._keychain_service = keychain_service
         self._keychain_account = keychain_account
-        self._local_state_paths: Optional[list[Path]] = (
+        self._local_state_paths: list[Path] | None = (
             [Path(p) for p in local_state_paths] if local_state_paths is not None else None
         )
-        self._tempdir: Optional[Path] = None
+        self._tempdir: Path | None = None
 
     def _snapshot(self, src: Path) -> Path:
         if self._tempdir is None:
@@ -359,7 +360,7 @@ class CookiesImporter:
         self,
         rows: Iterable[sqlite3.Row],
         key: bytes,
-        decrypt_fn: Callable[[bytes, bytes], Optional[bytes]],
+        decrypt_fn: Callable[[bytes, bytes], bytes | None],
     ) -> Iterable[dict]:
         decrypt_fail = 0
         decoded = 0
@@ -416,7 +417,7 @@ class CookiesImporter:
         if decoded:
             logger.info(f"🔓 Decrypted {decoded} encrypted cookie values")
 
-    def _resolve_key_and_decrypt_fn(self) -> Tuple[bytes, Callable[[bytes, bytes], Optional[bytes]], Optional[str]]:
+    def _resolve_key_and_decrypt_fn(self) -> tuple[bytes, Callable[[bytes, bytes], bytes | None], str | None]:
         """Return ``(key, decrypt_fn, None)`` on success or ``(b"", noop, error_code)``.
 
         Hides macOS Keychain vs Windows DPAPI behind a single dispatch.

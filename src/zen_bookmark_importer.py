@@ -6,16 +6,16 @@ Imports Arc browser bookmarks into Zen browser's places.sqlite database.
 Creates folder structure for each Arc space.
 """
 
-import sqlite3
+import hashlib
 import json
+import logging
+import sqlite3
 import time
 import uuid
-from pathlib import Path
-from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timezone
-import logging
-import hashlib
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -35,7 +35,7 @@ class ZenFolder:
     """Represents a bookmark folder in Zen."""
     title: str
     parent_id: int
-    folder_id: Optional[int] = None
+    folder_id: int | None = None
 
 
 class ZenBookmarkImporter:
@@ -133,7 +133,7 @@ class ZenBookmarkImporter:
             logger.error(f"❌ Failed to backup database: {e}")
             return False
 
-    def import_bookmarks(self, export_data: Dict, dry_run: bool = False) -> bool:
+    def import_bookmarks(self, export_data: dict, dry_run: bool = False) -> bool:
         """Import Arc bookmarks into Zen database."""
         if not self.check_zen_database():
             return False
@@ -206,7 +206,7 @@ class ZenBookmarkImporter:
 
             conn.close()
 
-            logger.info(f"📊 Import Summary:")
+            logger.info("📊 Import Summary:")
             logger.info(f"  ✅ Imported: {imported_count} bookmarks")
             logger.info(f"  ⚪ Skipped: {skipped_count} bookmarks")
 
@@ -219,7 +219,7 @@ class ZenBookmarkImporter:
                 conn.close()
             return False
 
-    def _create_arc_space_folder(self, conn: sqlite3.Connection, space_name: str, dry_run: bool = False) -> Optional[int]:
+    def _create_arc_space_folder(self, conn: sqlite3.Connection, space_name: str, dry_run: bool = False) -> int | None:
         """Create a folder for an Arc space under 'unfiled' bookmarks."""
         try:
             # Get the unfiled bookmarks folder ID
@@ -274,7 +274,7 @@ class ZenBookmarkImporter:
             logger.error(f"Failed to create folder '{space_name}': {e}")
             return None
 
-    def _create_subfolder(self, conn: sqlite3.Connection, folder_name: str, parent_id: int, dry_run: bool = False) -> Optional[int]:
+    def _create_subfolder(self, conn: sqlite3.Connection, folder_name: str, parent_id: int, dry_run: bool = False) -> int | None:
         """Create a subfolder under the given parent folder."""
         try:
             # Check if folder already exists
@@ -323,7 +323,7 @@ class ZenBookmarkImporter:
             logger.error(f"Failed to create subfolder '{folder_name}': {e}")
             return None
 
-    def _import_single_bookmark(self, conn: sqlite3.Connection, bookmark_data: Dict,
+    def _import_single_bookmark(self, conn: sqlite3.Connection, bookmark_data: dict,
                               folder_id: int, dry_run: bool = False) -> bool:
         """Import a single bookmark into the specified folder."""
         try:
@@ -379,7 +379,7 @@ class ZenBookmarkImporter:
             return False
 
     def _create_place(self, conn: sqlite3.Connection, url: str, title: str,
-                     bookmark_data: Dict, place_guid: str) -> int:
+                     bookmark_data: dict, place_guid: str) -> int:
         """Create a new place (URL) in moz_places."""
         # Calculate frecency (simplified)
         visit_count = bookmark_data.get('visit_count', 1)
@@ -438,7 +438,7 @@ class ZenBookmarkImporter:
         """Get current time in microseconds (Firefox format)."""
         return int(time.time() * 1_000_000)
 
-    def _parse_visit_time(self, visit_time_str: Optional[str]) -> int:
+    def _parse_visit_time(self, visit_time_str: str | None) -> int:
         """Parse visit time string to Firefox timestamp."""
         if not visit_time_str:
             return self._now_microseconds()
@@ -483,7 +483,7 @@ def main():
         print("Run arc_bookmark_extractor.py first!")
         return
 
-    with open(export_file, 'r') as f:
+    with open(export_file) as f:
         export_data = json.load(f)
 
     total_bookmarks = sum(len(p['bookmarks']) for p in export_data['profiles'])

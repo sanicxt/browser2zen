@@ -32,11 +32,11 @@ class EnvReport:
     # Source-browser fields describe whichever source is currently
     # selected (Arc by default). They were called ``arc_*`` historically.
     source_installed: bool
-    source_data_path: Optional[Path]
+    source_data_path: Path | None
     source_profiles: list[str]            # subdirectory names with migrate-able data
     source_running: bool
     # Arc-only — not populated for other sources.
-    arc_storable_sidebar: Optional[Path]
+    arc_storable_sidebar: Path | None
     zen_installed: bool
     zen_profiles: list[ZenProfile]
     zen_running: bool
@@ -67,7 +67,7 @@ def _arc_user_data_dirs() -> list[Path]:
     return [home / ".config/Arc/User Data"]
 
 
-def _arc_user_data_dir() -> Optional[Path]:
+def _arc_user_data_dir() -> Path | None:
     """First existing Arc User Data dir, or the canonical-but-missing one."""
     candidates = _arc_user_data_dirs()
     for c in candidates:
@@ -76,7 +76,7 @@ def _arc_user_data_dir() -> Optional[Path]:
     return candidates[0] if candidates else None
 
 
-def _arc_storable_sidebar() -> Optional[Path]:
+def _arc_storable_sidebar() -> Path | None:
     """Path to Arc's StorableSidebar.json: present whenever Arc has data."""
     home = Path.home()
     candidates = [
@@ -91,7 +91,7 @@ def _arc_storable_sidebar() -> Optional[Path]:
     return None
 
 
-def _arc_profiles(user_data: Optional[Path]) -> list[str]:
+def _arc_profiles(user_data: Path | None) -> list[str]:
     """List Arc profile directory names. Newer Chromium builds keep the
     History SQLite at ``<profile>/History``; some store it under
     ``<profile>/Network/`` after the cookie/network split. Either is a
@@ -222,7 +222,7 @@ def is_zen_running() -> bool:
 # ---------- previous migration marker ----------
 
 
-def _previous_migration_detected(zen_profile_path: Optional[Path]) -> bool:
+def _previous_migration_detected(zen_profile_path: Path | None) -> bool:
     if zen_profile_path is None:
         return False
     # Honour the legacy ``.arc2zen-migrated`` marker too, so an early

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from .chromium import ChromiumExtractor
 
 
@@ -12,13 +10,13 @@ class EdgeExtractor(ChromiumExtractor):
     display_name = "Microsoft Edge"
 
     user_data_dirs_macos = (
-        Path.home() / "Library/Application Support/Microsoft Edge",
+        "Library/Application Support/Microsoft Edge",
     )
     user_data_dirs_windows = (
-        Path.home() / "AppData/Local/Microsoft/Edge/User Data",
+        "AppData/Local/Microsoft/Edge/User Data",
     )
     user_data_dirs_linux = (
-        Path.home() / ".config/microsoft-edge",
+        ".config/microsoft-edge",
     )
 
     keychain_service = "Microsoft Edge Safe Storage"

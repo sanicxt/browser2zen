@@ -31,27 +31,35 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
-_ARC_USER_DATA_PATHS = (
-    # macOS
-    Path.home() / "Library/Application Support/Arc/User Data",
-    # Windows: UWP package layout (most common) and the standalone installer.
-    Path.home() / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
-                 / "LocalCache/Local/Arc/User Data",
-    Path.home() / "AppData/Local/Arc/User Data",
+# Paths are kept as strings *relative to Path.home()* so tests can
+# monkeypatch Path.home() without the values being baked in at import.
+_ARC_USER_DATA_RELS = (
+    "Library/Application Support/Arc/User Data",
+    "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4/LocalCache/Local/Arc/User Data",
+    "AppData/Local/Arc/User Data",
 )
-_ARC_STORABLE_SIDEBAR_PATHS = (
-    Path.home() / "Library/Application Support/Arc/StorableSidebar.json",
-    Path.home() / "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4"
-                 / "LocalCache/Local/Arc/StorableSidebar.json",
-    Path.home() / "AppData/Local/Arc/StorableSidebar.json",
+_ARC_STORABLE_SIDEBAR_RELS = (
+    "Library/Application Support/Arc/StorableSidebar.json",
+    "AppData/Local/Packages/TheBrowserCompany.Arc_ttt1ap7aakyb4/LocalCache/Local/Arc/StorableSidebar.json",
+    "AppData/Local/Arc/StorableSidebar.json",
 )
 
 
-def _first_existing(paths) -> Optional[Path]:
+def _first_existing(paths) -> Path | None:
     for p in paths:
         if p.exists():
             return p
     return None
+
+
+def _arc_user_data_paths() -> tuple[Path, ...]:
+    home = Path.home()
+    return tuple(home / rel for rel in _ARC_USER_DATA_RELS)
+
+
+def _arc_storable_sidebar_paths() -> tuple[Path, ...]:
+    home = Path.home()
+    return tuple(home / rel for rel in _ARC_STORABLE_SIDEBAR_RELS)
 
 
 class ArcExtractor(BrowserExtractor):
@@ -61,10 +69,10 @@ class ArcExtractor(BrowserExtractor):
     # ---- detection ------------------------------------------------------
 
     def is_installed(self) -> bool:
-        return _first_existing(_ARC_STORABLE_SIDEBAR_PATHS) is not None
+        return _first_existing(_arc_storable_sidebar_paths()) is not None
 
     def profile_paths(self) -> list[Path]:
-        root = _first_existing(_ARC_USER_DATA_PATHS)
+        root = _first_existing(_arc_user_data_paths())
         if root is None:
             return []
         return [
@@ -141,8 +149,8 @@ class ArcExtractor(BrowserExtractor):
 
     # ---- chromium-style data paths --------------------------------------
 
-    def _user_data_dir(self) -> Optional[Path]:
-        return _first_existing(_ARC_USER_DATA_PATHS)
+    def _user_data_dir(self) -> Path | None:
+        return _first_existing(_arc_user_data_paths())
 
     def history_db_paths(self) -> list[Path]:
         root = self._user_data_dir()
@@ -188,7 +196,7 @@ class ArcExtractor(BrowserExtractor):
         # this method moves into chromium.py and the service name comes
         # from the subclass.
         if sys.platform == "darwin":
-            from chromium_cookies_importer import _read_keychain_password, _derive_aes_key_macos
+            from chromium_cookies_importer import _derive_aes_key_macos, _read_keychain_password
             password = _read_keychain_password()
             if password is None:
                 raise BrowserExtractorError(
@@ -198,7 +206,7 @@ class ArcExtractor(BrowserExtractor):
             return _derive_aes_key_macos(password)
 
         if os.name == "nt":
-            from chromium_cookies_importer import _read_local_state_key_windows, _DpapiError
+            from chromium_cookies_importer import _DpapiError, _read_local_state_key_windows
             try:
                 return _read_local_state_key_windows()
             except _DpapiError as exc:

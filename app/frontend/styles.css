@@ -510,7 +510,7 @@ body[data-platform="mac"] main {
 
   position: relative;
   display: grid;
-  grid-template-columns: 32px 1fr auto;
+  grid-template-columns: 18px 32px 1fr auto;
   align-items: center;
   gap: var(--space-3);
   /* Leave 4 px on the left for the absolutely-positioned coloured edge. */
@@ -521,6 +521,28 @@ body[data-platform="mac"] main {
   border: 1px solid var(--space-edge);
   border-radius: var(--radius-md);
   overflow: hidden;
+  cursor: pointer;
+  transition: opacity var(--dur-medium) var(--ease-standard),
+              border-color var(--dur-medium) var(--ease-standard);
+}
+.space-row:hover { border-color: var(--space-tint-strong); }
+.space-row .space-check {
+  /* Native checkbox styled to feel at-home on the dark card. */
+  margin: 0;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.space-row[data-included="false"] {
+  opacity: 0.45;
+}
+.space-row[data-included="false"] .name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+.space-row[data-included="false"]:hover {
+  opacity: 0.65;
 }
 .space-row::before {
   /* Coloured left edge — absolutely positioned so it spans the full row

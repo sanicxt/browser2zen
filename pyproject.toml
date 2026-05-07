@@ -1,0 +1,43 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # PyWebView's bridge module emits a DeprecationWarning on import on
+    # newer Pythons; not actionable from our side.
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = [
+    "tests/fixtures",
+    "build",
+]
+
+[tool.ruff.lint]
+# A pragmatic starter set. Ramp up later.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    # ``app.bridge`` exposes methods to JS that aren't called from Python.
+    # Avoids false positives on those.
+    "F401",
+    # The orchestrator + a few CLIs do ``sys.path.insert`` before importing.
+    # Documented and intentional.
+    "E402",
+    # We intentionally keep some legacy logging strings with .format() / %.
+    "UP032",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests don't need to obey the line-length rule; failing lines are
+# usually long error messages.
+"tests/*" = ["E501", "F841"]
+
+# Legacy code carried over from rafcabezas/arc2zen. We don't want to
+# touch it for cosmetics, only for real bugs. Generous ignores so the
+# project's own code stays under tighter lint without drowning in
+# inherited issues.
+"src/arc_pinned_tab_extractor.py" = ["E501", "B", "E701", "E722", "F841", "UP028", "UP035", "W293"]
+"src/zen_*.py" = ["E501", "B", "UP035", "E722", "B904"]
+"src/chromium_*.py" = ["E501", "UP035"]

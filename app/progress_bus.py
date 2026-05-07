@@ -25,11 +25,11 @@ from typing import Any, Literal, Optional, TypedDict
 class ProgressEvent(TypedDict, total=False):
     kind: Literal["step_start", "step_progress", "step_done", "step_error", "log", "warn", "info"]
     step: str
-    percent: Optional[float]   # 0..1, None when indeterminate
+    percent: float | None   # 0..1, None when indeterminate
     message: str
-    detail: Optional[str]
+    detail: str | None
     ts: float
-    summary: Optional[dict]    # populated on step_done with the importer's return dict
+    summary: dict | None    # populated on step_done with the importer's return dict
 
 
 class ProgressBus(logging.Handler):
@@ -42,7 +42,7 @@ class ProgressBus(logging.Handler):
     def __init__(self) -> None:
         super().__init__(level=logging.INFO)
         self._queue: queue.Queue[ProgressEvent] = queue.Queue()
-        self._step: Optional[str] = None
+        self._step: str | None = None
         self._lock = threading.Lock()
 
     # ---- step context ----
@@ -51,7 +51,7 @@ class ProgressBus(logging.Handler):
         with self._lock:
             self._step = step
 
-    def current_step(self) -> Optional[str]:
+    def current_step(self) -> str | None:
         with self._lock:
             return self._step
 

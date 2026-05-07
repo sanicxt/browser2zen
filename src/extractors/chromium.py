@@ -41,7 +41,7 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
-def _first_existing(paths) -> Optional[Path]:
+def _first_existing(paths) -> Path | None:
     for p in paths:
         if p and p.exists():
             return p
@@ -63,11 +63,12 @@ class ChromiumExtractor(BrowserExtractor):
     display_name: str = ""
 
     # Filesystem ----------------------------------------------------------
-    # Candidate User-Data directories per platform. The first one that
-    # exists wins.
-    user_data_dirs_macos: tuple[Path, ...] = ()
-    user_data_dirs_windows: tuple[Path, ...] = ()
-    user_data_dirs_linux: tuple[Path, ...] = ()
+    # Candidate User-Data directories per platform, expressed as paths
+    # *relative to Path.home()*. The base class prepends ``Path.home()``
+    # at lookup time so tests can monkeypatch it.
+    user_data_dirs_macos: tuple[str, ...] = ()
+    user_data_dirs_windows: tuple[str, ...] = ()
+    user_data_dirs_linux: tuple[str, ...] = ()
 
     # Cookie key ---------------------------------------------------------
     keychain_service: str = ""        # e.g. "Chrome Safe Storage"
@@ -80,12 +81,15 @@ class ChromiumExtractor(BrowserExtractor):
 
     # ---------- detection ----------
 
-    def _user_data_dir(self) -> Optional[Path]:
+    def _user_data_dir(self) -> Path | None:
+        home = Path.home()
         if sys.platform == "darwin":
-            return _first_existing(self.user_data_dirs_macos)
-        if os.name == "nt":
-            return _first_existing(self.user_data_dirs_windows)
-        return _first_existing(self.user_data_dirs_linux)
+            candidates = self.user_data_dirs_macos
+        elif os.name == "nt":
+            candidates = self.user_data_dirs_windows
+        else:
+            candidates = self.user_data_dirs_linux
+        return _first_existing(home / rel for rel in candidates)
 
     def is_installed(self) -> bool:
         root = self._user_data_dir()
@@ -198,7 +202,8 @@ class ChromiumExtractor(BrowserExtractor):
     def cookie_master_key(self) -> bytes:
         if sys.platform == "darwin":
             from chromium_cookies_importer import (
-                _read_keychain_password, _derive_aes_key_macos,
+                _derive_aes_key_macos,
+                _read_keychain_password,
             )
             password = _read_keychain_password(
                 service=self.keychain_service,
@@ -213,7 +218,8 @@ class ChromiumExtractor(BrowserExtractor):
 
         if os.name == "nt":
             from chromium_cookies_importer import (
-                _read_local_state_key_windows, _DpapiError,
+                _DpapiError,
+                _read_local_state_key_windows,
             )
             try:
                 return _read_local_state_key_windows(self.local_state_paths())
@@ -322,7 +328,7 @@ class ChromiumExtractor(BrowserExtractor):
         node: dict,
         space_id: str,
         folder_path: list[str],
-        parent_id: Optional[str],
+        parent_id: str | None,
         tabs_out: list[TabRecord],
         folders_out: list[FolderRecord],
     ) -> None:

@@ -60,6 +60,21 @@ def _bookmarks_plist() -> Path:
     return Path.home() / "Library/Safari/Bookmarks.plist"
 
 
+def _list_has_content(node: dict) -> bool:
+    """True if the list has at least one URL leaf anywhere under it."""
+    stack = list(node.get("Children") or [])
+    while stack:
+        child = stack.pop()
+        if not isinstance(child, dict):
+            continue
+        wtype = child.get("WebBookmarkType")
+        if wtype == "WebBookmarkTypeLeaf" and (child.get("URLString") or "").strip():
+            return True
+        if wtype == "WebBookmarkTypeList":
+            stack.extend(child.get("Children") or [])
+    return False
+
+
 class SafariExtractor(BrowserExtractor):
     name = "safari"
     display_name = "Safari"
@@ -157,6 +172,10 @@ class SafariExtractor(BrowserExtractor):
             wtype = child.get("WebBookmarkType")
             if wtype != "WebBookmarkTypeList":
                 continue
+            # Skip empty wrappers so the user doesn't see vestigial
+            # "Reading List" or "Bookmarks Menu" folders in Zen.
+            if not _list_has_content(child):
+                continue
             title = child.get("Title", "") or ""
             label = _TOP_LEVEL_LABELS.get(title, title or "Bookmarks")
             wrapper_id = self._stable_folder_id(space_id, [label])
@@ -205,7 +224,7 @@ class SafariExtractor(BrowserExtractor):
         self,
         node: dict[str, Any],
         folder_path: list[str],
-        parent_record_id: Optional[str],
+        parent_record_id: str | None,
         space_id: str,
         tabs_out: list[TabRecord],
         folders_out: list[FolderRecord],

@@ -52,7 +52,7 @@ def _safe(payload: Any) -> Any:
 class Bridge:
     def __init__(self) -> None:
         self.orchestrator = MigrationOrchestrator()
-        self._worker: Optional[threading.Thread] = None
+        self._worker: threading.Thread | None = None
         self._final_state: dict = {"status": "idle"}  # 'idle' | 'running' | 'done' | 'error'
         self._lock = threading.Lock()
 
@@ -130,7 +130,7 @@ class Bridge:
 
     # ---- backup management ------------------------------------------
 
-    def list_backups(self, profile_path: Optional[str] = None) -> list:
+    def list_backups(self, profile_path: str | None = None) -> list:
         """List all *.backup.<unix_ts> files in a Zen profile, newest first."""
         from datetime import datetime
         profile = Path(profile_path) if profile_path else self._guess_zen_profile()
@@ -179,8 +179,10 @@ class Bridge:
             for suffix in ("-wal", "-shm"):
                 stale = target.with_name(target.name + suffix)
                 if stale.is_file():
-                    try: stale.unlink()
-                    except Exception: pass
+                    try:
+                        stale.unlink()
+                    except Exception:
+                        pass
             return {"ok": True, "restored": str(target)}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
@@ -195,7 +197,7 @@ class Bridge:
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
 
-    def _guess_zen_profile(self) -> Optional[Path]:
+    def _guess_zen_profile(self) -> Path | None:
         from .env_check import list_zen_profiles
         profs = list_zen_profiles()
         return profs[0].path if profs else None
@@ -355,9 +357,12 @@ class Bridge:
     def _parse_options(opts_json: str) -> MigrationOptions:
         data = json.loads(opts_json) if isinstance(opts_json, str) else dict(opts_json)
         zen_profile = Path(data["zenProfilePath"]).expanduser()
+        excluded_raw = data.get("excludedSpaces") or []
+        excluded_spaces = [str(name) for name in excluded_raw if isinstance(name, str)]
         return MigrationOptions(
             zen_profile_path=zen_profile,
             space_filter=data.get("spaceFilter") or None,
+            excluded_spaces=excluded_spaces,
             folders_collapsed=bool(data.get("foldersCollapsed", True)),
             include_workspaces=bool(data.get("includeWorkspaces", True)),
             include_pinned_tabs=bool(data.get("includePinnedTabs", True)),

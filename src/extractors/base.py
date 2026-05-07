@@ -46,9 +46,9 @@ class TabRecord:
     url: str
     title: str = ""
     folder_path: list[str] = field(default_factory=list)
-    folder_id: Optional[str] = None
+    folder_id: str | None = None
     is_essential: bool = False              # only Arc has Essentials
-    favicon_data: Optional[bytes] = None     # only Safari embeds; otherwise loaded later
+    favicon_data: bytes | None = None     # only Safari embeds; otherwise loaded later
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -64,7 +64,7 @@ class TabRecord:
 class FolderRecord:
     folder_id: str
     title: str
-    parent_id: Optional[str] = None
+    parent_id: str | None = None
     space_id: str = ""
     children_ids: list[str] = field(default_factory=list)
     index: int = 0
@@ -93,8 +93,8 @@ class SpaceRecord:
     pinned_tabs: list[TabRecord] = field(default_factory=list)
     open_tabs: list[TabRecord] = field(default_factory=list)
     folders: list[FolderRecord] = field(default_factory=list)
-    icon: Optional[str] = None              # emoji, single-char string
-    color: Optional[dict[str, float]] = None  # {r,g,b} floats in 0..1
+    icon: str | None = None              # emoji, single-char string
+    color: dict[str, float] | None = None  # {r,g,b} floats in 0..1
 
     def to_dict(self) -> dict[str, Any]:
         return {

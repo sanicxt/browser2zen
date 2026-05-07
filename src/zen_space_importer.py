@@ -7,12 +7,12 @@ as pinned tabs in the correct spaces, not as bookmarks.
 """
 
 import json
-import uuid
 import logging
-from pathlib import Path
-from typing import List, Dict, Optional
+import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +66,11 @@ class ZenSpaceImporter:
         self.containers_file = zen_profile.path / "containers.json"
         self.prefs_file = zen_profile.path / "prefs.js"
 
-    def load_existing_containers(self) -> Dict:
+    def load_existing_containers(self) -> dict:
         """Load existing container configuration."""
         try:
             if self.containers_file.exists():
-                with open(self.containers_file, 'r') as f:
+                with open(self.containers_file) as f:
                     return json.load(f)
             else:
                 # Create default container structure
@@ -91,7 +91,7 @@ class ZenSpaceImporter:
             logger.error(f"Failed to load containers: {e}")
             return {}
 
-    def create_containers_for_spaces(self, arc_spaces: List) -> Dict[str, int]:
+    def create_containers_for_spaces(self, arc_spaces: list) -> dict[str, int]:
         """Create Zen containers for Arc spaces and return space_name -> container_id mapping."""
         container_config = self.load_existing_containers()
         if not container_config:
@@ -154,24 +154,24 @@ class ZenSpaceImporter:
 
         return space_to_container
 
-    def save_containers(self, container_config: Dict) -> bool:
+    def save_containers(self, container_config: dict) -> bool:
         """Save container configuration to containers.json."""
         try:
             with open(self.containers_file, 'w') as f:
                 json.dump(container_config, f, separators=(',', ':'))
-            logger.info(f"✅ Updated containers.json")
+            logger.info("✅ Updated containers.json")
             return True
         except Exception as e:
             logger.error(f"Failed to save containers: {e}")
             return False
 
-    def update_prefs_for_workspaces(self, active_workspace_id: Optional[str] = None) -> bool:
+    def update_prefs_for_workspaces(self, active_workspace_id: str | None = None) -> bool:
         """Update prefs.js to enable workspace features."""
         try:
             # Read existing prefs
             prefs_content = ""
             if self.prefs_file.exists():
-                with open(self.prefs_file, 'r') as f:
+                with open(self.prefs_file) as f:
                     prefs_content = f.read()
 
             # Ensure workspace preferences are set
@@ -201,7 +201,7 @@ class ZenSpaceImporter:
             logger.error(f"Failed to update prefs: {e}")
             return False
 
-    def import_spaces_as_containers(self, export_data: Dict, dry_run: bool = False) -> Dict[str, int]:
+    def import_spaces_as_containers(self, export_data: dict, dry_run: bool = False) -> dict[str, int]:
         """Import Arc spaces as Zen containers."""
         try:
             arc_spaces = export_data.get('spaces', [])
@@ -249,13 +249,13 @@ class ZenSpaceImporter:
             logger.error(f"Failed to import Arc spaces as containers: {e}")
             return {}
 
-    def create_workspaces_guide(self, space_to_container: Dict[str, int], arc_spaces: List) -> None:
+    def create_workspaces_guide(self, space_to_container: dict[str, int], arc_spaces: list) -> None:
         """Create a guide file to help users set up workspaces."""
         try:
             guide_data = {
                 "zen_workspace_setup_guide": {
                     "version": "1.0",
-                    "created": datetime.now(timezone.utc).isoformat(),
+                    "created": datetime.now(UTC).isoformat(),
                     "note": "This file contains a guide for manually setting up Zen workspaces for your Arc spaces",
                     "instructions": [
                         "1. Open Zen browser and click 'Default' in the sidebar",
@@ -319,7 +319,7 @@ def main():
         print(f"📁 Using Zen profile: {zen_profile_path.name}")
 
         # Load Arc export data
-        with open(args.arc_export_file, 'r') as f:
+        with open(args.arc_export_file) as f:
             export_data = json.load(f)
 
         # Create importer

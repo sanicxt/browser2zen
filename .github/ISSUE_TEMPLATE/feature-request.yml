@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest an idea or improvement.
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the suggestion. Before submitting, please check that the idea
+        isn't already in [open issues](https://github.com/tarikbc/browser2zen/issues).
+
+  - type: textarea
+    id: motivation
+    attributes:
+      label: Motivation
+      description: What problem are you running into, or what use case isn't covered?
+      placeholder: "When migrating from Chrome, I wanted to keep only my work profile..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behaviour
+      description: |
+        How would you like the app to behave? Sketch out the UX or the option name.
+        It's fine to leave this rough.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which area does this touch?
+      multiple: true
+      options:
+        - Source browser support (new browser, or new data on an existing one)
+        - GUI / UX
+        - CLI / scripting
+        - Build / packaging / distribution
+        - Documentation
+        - Something else
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Workarounds, manual steps, or other tools that solved this for you.

@@ -1,0 +1,40 @@
+{
+  "checksum": "0",
+  "roots": {
+    "bookmark_bar": {
+      "children": [
+        {
+          "type": "url",
+          "name": "Example",
+          "url": "https://example.com/",
+          "guid": "11111111-aaaa-bbbb-cccc-111111111111",
+          "id": "1",
+          "date_added": "13000000000000000"
+        },
+        {
+          "type": "folder",
+          "name": "Test Folder",
+          "guid": "11111111-aaaa-bbbb-cccc-222222222222",
+          "id": "2",
+          "children": [
+            {
+              "type": "url",
+              "name": "Mozilla",
+              "url": "https://mozilla.org/",
+              "guid": "11111111-aaaa-bbbb-cccc-333333333333",
+              "id": "3",
+              "date_added": "13000000000000001"
+            }
+          ]
+        }
+      ]
+    },
+    "other": {
+      "children": []
+    },
+    "synced": {
+      "children": []
+    }
+  },
+  "version": 1
+}
