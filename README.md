@@ -21,6 +21,20 @@ terminal, no Python, no install steps to follow.
 
 ---
 
+## Screenshots
+
+<table>
+  <tr>
+    <td><img src="docs/screenshots/welcome.png" alt="Welcome screen showing all six supported source browsers next to the Zen logo"></td>
+    <td><img src="docs/screenshots/source-picker.png" alt="Source picker with Arc, Chrome, Edge, Brave, Firefox, and Safari cards, dimmed when not installed"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><img src="docs/screenshots/detect.png" alt="Detect screen confirming the chosen source browser and Zen profile are ready" width="80%"></td>
+  </tr>
+</table>
+
+---
+
 ## Install
 
 Open the [latest release](./releases/latest) and pick the artifact
