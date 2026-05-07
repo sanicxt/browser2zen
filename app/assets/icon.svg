@@ -6,12 +6,6 @@
       <stop offset="0%" stop-color="#1A1B22"/>
       <stop offset="100%" stop-color="#0E0F14"/>
     </linearGradient>
-    <!-- Zen badge (gunmetal) -->
-    <linearGradient id="zenBg" x1="0" y1="0" x2="0.7" y2="1">
-      <stop offset="0%" stop-color="#2B2B2F"/>
-      <stop offset="70%" stop-color="#15151A"/>
-      <stop offset="100%" stop-color="#0B0B0E"/>
-    </linearGradient>
     <!-- Soft drop shadow used for every floating element -->
     <filter id="cardShadow" x="-30%" y="-30%" width="160%" height="160%">
       <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000" flood-opacity="0.40"/>
@@ -73,15 +67,20 @@
   </g>
 
   <!-- ================================================================
-       Right side: Zen badge with three concentric rings, mirroring the
-       brand-mark.zen styling in the GUI.
+       Right side: the official Zen Browser logo. Concentric-circles
+       design transcribed from
+       https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/zen-browser-dark.svg.
+       Native viewBox is 860x860 starting at (82, 82) (i.e. 1024x1024
+       canvas with 82 px insets). We scale to fit our 320x320 area.
        ================================================================ -->
   <g transform="translate(620 350)" filter="url(#cardShadow)">
-    <rect width="320" height="320" rx="68" ry="68" fill="url(#zenBg)"/>
-    <g transform="translate(160 160)" stroke="#F2F2F4" stroke-width="11" fill="none">
-      <circle r="118"/>
-      <circle r="78"/>
-      <circle r="38"/>
+    <!-- Scale homarr-labs's 1024 canvas into 320 (factor 0.3125) and
+         compensate for the 82 px inset offset. -->
+    <g transform="scale(0.3125) translate(-82 -82)">
+      <rect x="82" y="82" width="860" height="860" rx="155.371" fill="#202020"/>
+      <circle cx="512.439" cy="512.439" r="113.02" stroke="#F2F0E3" stroke-width="25.1953" fill="none"/>
+      <circle cx="512.439" cy="512.439" r="197.737" stroke="#F2F0E3" stroke-width="41.9922" fill="none"/>
+      <circle cx="512.439" cy="512.439" r="298.266" stroke="#F2F0E3" stroke-width="58.7891" fill="none"/>
     </g>
   </g>
 </svg>

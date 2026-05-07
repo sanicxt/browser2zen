@@ -5,11 +5,6 @@
       <stop offset="0%" stop-color="#1A1B22"/>
       <stop offset="100%" stop-color="#0E0F14"/>
     </linearGradient>
-    <linearGradient id="zenBg" x1="0" y1="0" x2="0.7" y2="1">
-      <stop offset="0%" stop-color="#2B2B2F"/>
-      <stop offset="70%" stop-color="#15151A"/>
-      <stop offset="100%" stop-color="#0B0B0E"/>
-    </linearGradient>
     <linearGradient id="chipShine" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#FFFFFF" stop-opacity="0.35"/>
       <stop offset="50%" stop-color="#FFFFFF" stop-opacity="0.0"/>
@@ -61,13 +56,16 @@
     <polyline points="6,-18 26,0 6,18"/>
   </g>
 
-  <!-- Zen badge -->
+  <!-- Zen badge: concentric-circles mark (homarr-labs/dashboard-icons,
+       zen-browser-dark variant). Source canvas is 1024x1024 with 82 px
+       insets. We fit it into a 200x200 area at (520, 220) by scaling
+       0.1953125 (200/1024) and translating to remove the inset. -->
   <g transform="translate(520 220)" filter="url(#cardShadow)">
-    <rect width="200" height="200" rx="44" ry="44" fill="url(#zenBg)"/>
-    <g transform="translate(100 100)" stroke="#F2F2F4" stroke-width="7" fill="none">
-      <circle r="74"/>
-      <circle r="49"/>
-      <circle r="24"/>
+    <g transform="scale(0.1953125) translate(-82 -82)">
+      <rect x="82" y="82" width="860" height="860" rx="155.371" fill="#202020"/>
+      <circle cx="512.439" cy="512.439" r="113.02" stroke="#F2F0E3" stroke-width="25.1953" fill="none"/>
+      <circle cx="512.439" cy="512.439" r="197.737" stroke="#F2F0E3" stroke-width="41.9922" fill="none"/>
+      <circle cx="512.439" cy="512.439" r="298.266" stroke="#F2F0E3" stroke-width="58.7891" fill="none"/>
     </g>
   </g>
 
