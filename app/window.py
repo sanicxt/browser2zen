@@ -55,7 +55,10 @@ def launch(debug: bool = False) -> None:
         # snap zones, Aero shake, multi-monitor DPI handling, and the
         # platform-correct close/minimize/maximize buttons for free.
         frameless=is_mac,
-        easy_drag=is_mac,
+        # easy_drag=True makes the *entire* window a drag region. We want
+        # only our titlebar to drag (CSS sets -webkit-app-region on it),
+        # so this stays off.
+        easy_drag=False,
         background_color="#0E0F12",
         vibrancy=is_mac,
     )

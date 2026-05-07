@@ -281,6 +281,16 @@ class Bridge:
             logger.exception("quit_browser %s failed", name)
             return {"ok": False, "error": str(exc)}
 
+    def is_zen_running(self) -> bool:
+        # Used by the backup/restore screens to gate the action. Cheaper
+        # than ``check_env`` since it skips source-browser detection.
+        from env_check import is_zen_running as _is_zen_running
+        try:
+            return bool(_is_zen_running())
+        except Exception:
+            logger.exception("is_zen_running failed")
+            return False
+
     def quit_source(self) -> dict:
         """Quit whatever source browser is currently selected. Lets the
         frontend skip the name dispatch entirely."""
@@ -344,6 +354,245 @@ class Bridge:
         with self._lock:
             state = dict(self._final_state)
         return {"events": _safe(events), "state": state, "steps": list(GUI_STEPS), "labels": STEP_LABELS}
+
+    # ---------- backup + restore (.zenbackup) ----------
+    #
+    # The migration flow lives in MigrationOrchestrator. Backup is its own
+    # thing: a single tar.gz on disk, no Zen-side writers downstream. We
+    # reuse the same worker-thread + ProgressBus pattern so the existing
+    # progress screen Just Works. Each "step" emits a tiny dict via the
+    # bus; the frontend renders progress identically to migration.
+
+    def list_zen_profiles_json(self) -> list:
+        """Helper: profiles formatted for the backup screens (lighter
+        shape than env_check.list_zen_profiles)."""
+        from .env_check import list_zen_profiles
+        return [
+            {"name": p.name, "path": str(p.path),
+             "isRelease": p.is_release, "hasZenSessions": p.has_zen_sessions}
+            for p in list_zen_profiles()
+        ]
+
+    def list_backup_categories(self) -> list:
+        """Catalogue of (category, label, default_on, caveat) for the
+        export and restore screens."""
+        return [
+            {"id": "workspaces", "label": "Workspaces, pinned tabs, folders",
+             "default": True, "caveat": ""},
+            {"id": "browsing", "label": "Browsing data (bookmarks + history)",
+             "default": True, "caveat": ""},
+            {"id": "cookies", "label": "Login state",
+             "default": True, "caveat": ""},
+            {"id": "favicons", "label": "Favicons",
+             "default": True, "caveat": ""},
+            {"id": "passwords", "label": "Saved passwords",
+             "default": False,
+             "caveat": "If a master password is set on the source profile, "
+                       "the same password is required on the target machine. "
+                       "The encryption key travels with key4.db."},
+            {"id": "prefs", "label": "Preferences",
+             "default": False,
+             "caveat": "A few prefs reference absolute paths from the source "
+                       "machine. Most settings transfer cleanly, but some "
+                       "UI-state knobs may reset."},
+            {"id": "extensions", "label": "Extensions",
+             "default": False,
+             "caveat": "Extensions need to be compatible with the target "
+                       "machine's Zen version. Mismatches can leave "
+                       "extensions disabled. Adds the most archive size."},
+        ]
+
+    def choose_path(self, kind: str, default_name: str = "") -> str | None:
+        """Native file dialog. ``kind`` is 'save' or 'open'."""
+        try:
+            import webview as _webview
+        except Exception as exc:
+            logger.warning("pywebview missing for choose_path: %s", exc)
+            return None
+        if not _webview.windows:
+            return None
+        win = _webview.windows[0]
+
+        if kind == "save":
+            result = win.create_file_dialog(
+                _webview.SAVE_DIALOG,
+                save_filename=default_name or "zen-backup.zenbackup",
+                file_types=("Zen backup (*.zenbackup)",),
+            )
+        else:
+            result = win.create_file_dialog(
+                _webview.OPEN_DIALOG,
+                file_types=("Zen backup (*.zenbackup)",),
+            )
+        # PyWebView returns a tuple of paths on macOS, a single path string
+        # on some other platforms, and None on cancel.
+        if not result:
+            return None
+        if isinstance(result, (list, tuple)):
+            return str(result[0]) if result else None
+        return str(result)
+
+    def preview_zen_backup(self, archive_path: str) -> dict:
+        """Read the manifest of a .zenbackup file without unpacking."""
+        from pathlib import Path as _Path
+
+        from zen_backup import ZenBackupImporter
+        importer = ZenBackupImporter(_Path(archive_path), target_zen_profile=_Path("/"))
+        return _safe(importer.preview())
+
+    def start_zen_export(
+        self,
+        profile_path: str,
+        output_path: str,
+        includes_json: str,
+    ) -> dict:
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                return {"ok": False, "error": "another job is running"}
+        try:
+            includes = json.loads(includes_json) if isinstance(includes_json, str) else list(includes_json)
+            if not isinstance(includes, list):
+                raise ValueError("includes must be a JSON array")
+        except Exception as exc:
+            return {"ok": False, "error": f"bad includes: {exc}"}
+
+        with self._lock:
+            self._final_state = {"status": "running", "kind": "export"}
+
+        def _run() -> None:
+            from pathlib import Path as _Path
+
+            from zen_backup import ZenBackupExporter
+            try:
+                self._emit_step("snapshot", "Reading the Zen profile")
+                exporter = ZenBackupExporter(
+                    _Path(profile_path), _Path(output_path), includes=includes,
+                )
+                summary = exporter.export()
+                if summary.get("ok"):
+                    self._emit_step_done("snapshot", summary={"file_count": summary["file_count"]})
+                    self._emit_step("bundle", "Writing the archive",
+                                    summary={"bytes_out": summary["bytes_out"]})
+                    self._emit_step_done("bundle", summary={"bytes_out": summary["bytes_out"]})
+                    self._emit_step("finalize", "Done")
+                    self._emit_step_done("finalize")
+                    with self._lock:
+                        self._final_state = {
+                            "status": "done",
+                            "kind": "export",
+                            "archivePath": str(output_path),
+                            "bytesOut": summary["bytes_out"],
+                            "fileCount": summary["file_count"],
+                        }
+                else:
+                    err = "; ".join(summary.get("errors", []) or ["unknown export failure"])
+                    self._emit_step_error("snapshot", err)
+                    with self._lock:
+                        self._final_state = {"status": "error", "kind": "export", "error": err}
+            except Exception as exc:
+                logger.exception("zen export worker crashed")
+                with self._lock:
+                    self._final_state = {
+                        "status": "error", "kind": "export",
+                        "error": str(exc),
+                        "trace": traceback.format_exc(),
+                    }
+
+        self._worker = threading.Thread(target=_run, daemon=True, name="browser2zen-export")
+        self._worker.start()
+        return {"ok": True}
+
+    def start_zen_restore(
+        self,
+        archive_path: str,
+        target_profile_path: str,
+        includes_json: str,
+    ) -> dict:
+        with self._lock:
+            if self._worker is not None and self._worker.is_alive():
+                return {"ok": False, "error": "another job is running"}
+        try:
+            includes = json.loads(includes_json) if isinstance(includes_json, str) else list(includes_json)
+            # ``None`` means "everything in the archive" — JS sends null.
+            if includes is not None and not isinstance(includes, list):
+                raise ValueError("includes must be a JSON array or null")
+        except Exception as exc:
+            return {"ok": False, "error": f"bad includes: {exc}"}
+
+        with self._lock:
+            self._final_state = {"status": "running", "kind": "restore"}
+
+        def _run() -> None:
+            from pathlib import Path as _Path
+
+            from zen_backup import ZenBackupImporter
+            try:
+                self._emit_step("preflight", "Validating the archive")
+                importer = ZenBackupImporter(
+                    _Path(archive_path),
+                    _Path(target_profile_path),
+                    includes=includes,
+                )
+                preview = importer.preview()
+                if not preview.get("ok"):
+                    err = "; ".join(preview.get("errors", []) or ["bad archive"])
+                    self._emit_step_error("preflight", err)
+                    with self._lock:
+                        self._final_state = {"status": "error", "kind": "restore", "error": err}
+                    return
+                self._emit_step_done("preflight",
+                                     summary={"manifest": preview.get("manifest")})
+
+                self._emit_step("restore", "Restoring files")
+                summary = importer.import_archive()
+                if summary.get("ok"):
+                    self._emit_step_done("restore", summary={
+                        "restored": len(summary.get("restored_files", [])),
+                        "skipped": len(summary.get("skipped", [])),
+                    })
+                    self._emit_step("finalize", "Done")
+                    self._emit_step_done("finalize")
+                    with self._lock:
+                        self._final_state = {
+                            "status": "done", "kind": "restore",
+                            "targetProfilePath": str(target_profile_path),
+                            "restoredCount": len(summary.get("restored_files", [])),
+                        }
+                else:
+                    err = "; ".join(summary.get("errors", []) or ["unknown restore failure"])
+                    self._emit_step_error("restore", err)
+                    with self._lock:
+                        self._final_state = {"status": "error", "kind": "restore", "error": err}
+            except Exception as exc:
+                logger.exception("zen restore worker crashed")
+                with self._lock:
+                    self._final_state = {
+                        "status": "error", "kind": "restore",
+                        "error": str(exc),
+                        "trace": traceback.format_exc(),
+                    }
+
+        self._worker = threading.Thread(target=_run, daemon=True, name="browser2zen-restore")
+        self._worker.start()
+        return {"ok": True}
+
+    # Tiny helpers that emit step events through the orchestrator's bus
+    # without owning a full progress pipeline. The frontend's existing
+    # progress renderer reads these the same way it reads migration steps.
+    def _emit_step(self, step: str, message: str, summary: dict | None = None) -> None:
+        ev: dict = {"kind": "step_start", "step": step, "message": message}
+        if summary is not None:
+            ev["summary"] = summary
+        self.orchestrator.bus.push(ev)
+
+    def _emit_step_done(self, step: str, summary: dict | None = None) -> None:
+        ev: dict = {"kind": "step_done", "step": step}
+        if summary is not None:
+            ev["summary"] = summary
+        self.orchestrator.bus.push(ev)
+
+    def _emit_step_error(self, step: str, detail: str) -> None:
+        self.orchestrator.bus.push({"kind": "step_error", "step": step, "detail": detail})
 
     def get_step_metadata(self) -> dict:
         return {"steps": list(GUI_STEPS), "labels": STEP_LABELS}

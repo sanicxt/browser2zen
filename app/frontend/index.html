@@ -33,11 +33,105 @@
       </div>
       <div class="actions">
         <button class="btn btn-primary" id="welcome-go">Let's go</button>
+        <button class="btn btn-soft" id="welcome-backup">Backup or restore Zen</button>
       </div>
       <div class="footer">
         <span id="footer-brand">browser2zen · open source</span>
         <button class="link-btn" id="open-backups">Manage backups</button>
         <span>macOS · arm64</span>
+      </div>
+    </section>
+
+    <!-- ============================================ backup mode picker -->
+    <section class="screen" id="screen-backup-mode">
+      <p class="eyebrow">Backup &amp; restore</p>
+      <h1 class="h1">Move Zen between machines.</h1>
+      <p class="muted" style="margin-top: 4px;">Export the current profile to a portable file, or restore one onto a fresh Zen.</p>
+
+      <div class="backup-mode-grid">
+        <button class="backup-mode-card" type="button" id="backup-mode-export" data-mode="export">
+          <div class="backup-mode-card-title">Export this Zen profile</div>
+          <div class="backup-mode-card-desc">Bundle workspaces, bookmarks, history, login state and more into a single .zenbackup file.</div>
+        </button>
+        <button class="backup-mode-card" type="button" id="backup-mode-restore" data-mode="restore">
+          <div class="backup-mode-card-title">Restore from a .zenbackup</div>
+          <div class="backup-mode-card-desc">Open a backup file and write its contents into a Zen profile on this machine.</div>
+        </button>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="backup-mode-back">Back</button>
+      </div>
+    </section>
+
+    <!-- ============================================ backup: export -->
+    <section class="screen" id="screen-backup-export">
+      <p class="eyebrow">Backup &amp; restore · Export</p>
+      <h1 class="h1">Bundle this Zen profile.</h1>
+
+      <div class="backup-form">
+        <div class="backup-row">
+          <label class="backup-label">Source profile</label>
+          <select class="profile-select" id="backup-export-profile"></select>
+        </div>
+
+        <div class="backup-row">
+          <label class="backup-label">Include</label>
+          <div class="backup-categories" id="backup-export-categories"></div>
+        </div>
+
+        <div class="gate" id="backup-export-gate" style="display:none;">
+          <span id="backup-export-gate-text"></span>
+          <button class="btn btn-soft btn-pill" id="backup-export-quit-zen" style="display:none;">Quit Zen</button>
+          <button class="btn btn-soft btn-pill" id="backup-export-recheck">Recheck</button>
+        </div>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="backup-export-back">Back</button>
+        <button class="btn btn-primary" id="backup-export-go" disabled>Export</button>
+      </div>
+    </section>
+
+    <!-- ============================================ backup: restore -->
+    <section class="screen" id="screen-backup-restore">
+      <p class="eyebrow">Backup &amp; restore · Restore</p>
+      <h1 class="h1">Restore from a backup.</h1>
+
+      <div class="backup-form">
+        <div class="backup-row">
+          <label class="backup-label">Backup file</label>
+          <div class="backup-path-row">
+            <span class="backup-path muted" id="backup-restore-path">No file chosen yet.</span>
+            <button class="btn btn-soft btn-pill" type="button" id="backup-restore-pick">Choose…</button>
+          </div>
+        </div>
+
+        <div class="backup-row" id="backup-restore-manifest-row" style="display:none;">
+          <label class="backup-label">From</label>
+          <div class="backup-manifest" id="backup-restore-manifest"></div>
+        </div>
+
+        <div class="backup-row">
+          <label class="backup-label">Target profile</label>
+          <select class="profile-select" id="backup-restore-profile"></select>
+        </div>
+
+        <div class="backup-row">
+          <label class="backup-label">Restore</label>
+          <div class="backup-categories" id="backup-restore-categories"></div>
+        </div>
+
+        <div class="gate" id="backup-restore-gate" style="display:none;">
+          <span id="backup-restore-gate-text"></span>
+          <button class="btn btn-soft btn-pill" id="backup-restore-quit-zen" style="display:none;">Quit Zen</button>
+          <button class="btn btn-soft btn-pill" id="backup-restore-recheck">Recheck</button>
+        </div>
+      </div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="backup-restore-back">Back</button>
+        <button class="btn btn-primary" id="backup-restore-go" disabled>Restore</button>
       </div>
     </section>
 
@@ -151,13 +245,14 @@
                 stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
-      <h1 class="display">All set.</h1>
+      <h1 class="display" id="done-headline">All set.</h1>
       <p class="summary" id="done-summary">Your browser setup now lives in Zen.</p>
       <div class="actions">
         <button class="btn btn-primary" id="done-launch">Launch Zen</button>
+        <button class="btn btn-soft" id="done-back" style="display:none;">Back to home</button>
         <button class="btn btn-ghost" id="done-quit">Quit</button>
       </div>
-      <div class="backups">
+      <div class="backups" id="done-backups-section">
         <p class="eyebrow">Backups (click to reveal)</p>
         <ul id="backups-list"></ul>
       </div>

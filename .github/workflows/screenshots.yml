@@ -1,0 +1,61 @@
+name: Screenshots
+
+on:
+  pull_request:
+    paths:
+      - "app/frontend/**"
+      - "docs/screenshots/**"
+      - ".github/workflows/screenshots.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write   # we commit refreshed PNGs back to the PR branch
+
+concurrency:
+  group: screenshots-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  shoot:
+    # Skip PRs from forks: GITHUB_TOKEN can't push to a fork branch, and
+    # we don't want to run untrusted JS with write permissions anyway.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Bind once and reuse — keeps the `ref:` input out of any shell
+      # expansion path even though actions/checkout doesn't shell-eval it.
+      PR_HEAD_REF: ${{ github.head_ref }}
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_HEAD_REF }}
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Playwright
+        working-directory: docs/screenshots
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: Capture screenshots
+        working-directory: docs/screenshots
+        run: npm run shoot
+
+      - name: Commit refreshed PNGs
+        run: |
+          if git diff --quiet -- 'docs/screenshots/*.png'; then
+            echo "No screenshot changes — nothing to commit."
+            exit 0
+          fi
+          git config user.name  "browser2zen-shots[bot]"
+          git config user.email "browser2zen-shots[bot]@users.noreply.github.com"
+          git add docs/screenshots/*.png
+          git commit -m "chore(docs): refresh screenshots [skip ci]"
+          git push

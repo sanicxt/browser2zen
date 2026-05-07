@@ -1,0 +1,13 @@
+{
+  "name": "browser2zen-screenshots",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "shoot": "playwright test",
+    "shoot:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@types/node": "^22.10.0"
+  }
+}

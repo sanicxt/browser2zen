@@ -203,6 +203,7 @@ $("tl-close").addEventListener("click", async () => {
 // ---- welcome --------------------------------------------------------------
 
 $("welcome-go").addEventListener("click", () => goToSourcePicker());
+$("welcome-backup").addEventListener("click", () => setScreen("backup-mode"));
 
 async function goToSourcePicker() {
   setScreen("source");
@@ -901,20 +902,57 @@ function renderLog() {
 async function finishOk(finalState) {
   setScreen("done");
   const api = Bridge();
-  const ext = state.stepSummaries.extract || {};
-  const subtitle = ext.pinned
-    ? `${ext.pinned} pinned tabs across ${ext.spaces} spaces. Backups saved next to your Zen profile.`
-    : `Backups saved next to your Zen profile.`;
-  $("done-summary").textContent = subtitle;
+  const kind = finalState && finalState.kind;
+  const isBackup = kind === "export" || kind === "restore";
 
-  const list = $("backups-list"); clear(list);
-  const backups = (finalState.backups || []).slice(-12).reverse();
-  for (const path of backups) {
-    list.appendChild(el("li", {
-      dataset: {path},
-      text: shortenPath(path),
-      onclick: () => api.open_path_in_finder(path),
-    }));
+  const headline = $("done-headline");
+  const summary = $("done-summary");
+  const launch = $("done-launch");
+  const backupsSection = $("done-backups-section");
+
+  if (kind === "export") {
+    headline.textContent = "Backup saved.";
+    const path = finalState.archivePath || backupState.exportOutputPath;
+    summary.textContent = path ? shortenPath(path) : "Your Zen profile is bundled into a portable file.";
+    if (path) {
+      summary.style.cursor = "pointer";
+      summary.title = "Reveal in Finder";
+      summary.onclick = () => api && api.open_path_in_finder(path);
+    }
+  } else if (kind === "restore") {
+    headline.textContent = "Restore complete.";
+    const n = finalState.restoredCount || 0;
+    summary.textContent = n
+      ? `${n} file${n === 1 ? "" : "s"} written into your Zen profile.`
+      : "Your Zen profile has been updated.";
+    summary.style.cursor = "";
+    summary.title = "";
+    summary.onclick = null;
+  } else {
+    headline.textContent = "All set.";
+    const ext = state.stepSummaries.extract || {};
+    summary.textContent = ext.pinned
+      ? `${ext.pinned} pinned tabs across ${ext.spaces} spaces. Backups saved next to your Zen profile.`
+      : `Backups saved next to your Zen profile.`;
+    summary.style.cursor = "";
+    summary.title = "";
+    summary.onclick = null;
+  }
+
+  launch.style.display = isBackup ? "none" : "";
+  backupsSection.style.display = isBackup ? "none" : "";
+  $("done-back").style.display = isBackup ? "" : "none";
+
+  if (!isBackup) {
+    const list = $("backups-list"); clear(list);
+    const backups = (finalState.backups || []).slice(-12).reverse();
+    for (const path of backups) {
+      list.appendChild(el("li", {
+        dataset: {path},
+        text: shortenPath(path),
+        onclick: () => api.open_path_in_finder(path),
+      }));
+    }
   }
 }
 
@@ -926,6 +964,19 @@ $("done-launch").addEventListener("click", async () => {
   try { await api.launch_zen(); } catch (e) { /* best-effort */ }
   setTimeout(() => { api.quit_app(); }, 80);
 });
+$("done-back").addEventListener("click", () => {
+  // Reset backup state so a follow-up export/restore starts clean.
+  backupState.mode = null;
+  backupState.exportProfilePath = null;
+  backupState.exportOutputPath = null;
+  backupState.exportIncludes = new Set();
+  backupState.restoreArchivePath = null;
+  backupState.restoreTargetPath = null;
+  backupState.restoreIncludes = new Set();
+  backupState.restoreManifest = null;
+  setScreen("welcome");
+});
+
 $("done-quit").addEventListener("click", async () => {
   const api = Bridge(); if (api) api.quit_app();
 });
@@ -1118,3 +1169,378 @@ setTimeout(() => {
   decorateBranding();
   setScreen("welcome");
 }, 200);
+
+// ============================================================================
+// Backup & restore (.zenbackup)
+//
+// Lives off the welcome screen's "Backup or restore Zen" button. Two flows:
+//   Export:  pick source profile -> pick destination -> include checklist
+//            -> progress (snapshot/bundle/finalize) -> done
+//   Restore: pick .zenbackup -> manifest preview -> pick target profile
+//            -> include checklist -> progress (preflight/restore/finalize)
+//            -> done
+// Both flows reuse #screen-progress + #screen-done so the streaming-events
+// renderer needs no second copy.
+
+const backupState = {
+  mode: null,              // "export" | "restore"
+  categories: null,        // canonical [{id,label,default,caveat}] from bridge
+  zenProfiles: [],
+  // export inputs
+  exportProfilePath: null,
+  exportOutputPath: null,
+  exportIncludes: new Set(),
+  // restore inputs
+  restoreArchivePath: null,
+  restoreTargetPath: null,
+  restoreIncludes: new Set(),
+  restoreManifest: null,
+};
+
+async function loadBackupCategories() {
+  if (backupState.categories) return backupState.categories;
+  const api = await whenBridgeReady();
+  backupState.categories = await api.list_backup_categories();
+  return backupState.categories;
+}
+
+async function loadZenProfiles() {
+  const api = await whenBridgeReady();
+  backupState.zenProfiles = await api.list_zen_profiles_json();
+  return backupState.zenProfiles;
+}
+
+// ---- mode picker ----------------------------------------------------------
+
+$("backup-mode-back").addEventListener("click", () => setScreen("welcome"));
+$("backup-mode-export").addEventListener("click", () => goToBackupExport());
+$("backup-mode-restore").addEventListener("click", () => goToBackupRestore());
+
+// ---- export ---------------------------------------------------------------
+
+async function goToBackupExport() {
+  setScreen("backup-export");
+  backupState.mode = "export";
+  backupState.exportProfilePath = null;
+  backupState.exportOutputPath = null;
+  backupState.exportIncludes = new Set();
+  await renderBackupExportProfiles();
+  await renderBackupCategories("export");
+  await updateBackupExportGate();
+}
+
+async function renderBackupExportProfiles() {
+  const profiles = await loadZenProfiles();
+  const sel = $("backup-export-profile");
+  clear(sel);
+  if (!profiles.length) {
+    sel.appendChild(el("option", {value: "", text: "No Zen profile found"}));
+    sel.disabled = true;
+    backupState.exportProfilePath = null;
+    return;
+  }
+  sel.disabled = false;
+  for (const p of profiles) {
+    sel.appendChild(el("option", {
+      value: p.path,
+      text: p.name,
+    }));
+  }
+  backupState.exportProfilePath = profiles[0].path;
+  sel.onchange = () => {
+    backupState.exportProfilePath = sel.value;
+    updateBackupExportGate();
+  };
+}
+
+async function renderBackupCategories(flow) {
+  const cats = await loadBackupCategories();
+  const host = $(flow === "export" ? "backup-export-categories" : "backup-restore-categories");
+  const target = flow === "export" ? backupState.exportIncludes : backupState.restoreIncludes;
+  target.clear();
+  for (const c of cats) {
+    if (c.default) target.add(c.id);
+  }
+  // For restore, intersect with the manifest's included list if we have one.
+  if (flow === "restore" && backupState.restoreManifest) {
+    const manifestIncluded = new Set(backupState.restoreManifest.included || []);
+    for (const id of [...target]) {
+      if (!manifestIncluded.has(id)) target.delete(id);
+    }
+  }
+  clear(host);
+  for (const c of cats) {
+    const disabled = flow === "restore"
+      && backupState.restoreManifest
+      && !(backupState.restoreManifest.included || []).includes(c.id);
+    const checkbox = el("input", {
+      type: "checkbox",
+      checked: target.has(c.id) ? "checked" : null,
+    });
+    checkbox.checked = target.has(c.id);
+    if (disabled) checkbox.disabled = true;
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) target.add(c.id);
+      else target.delete(c.id);
+      if (flow === "export") updateBackupExportGate();
+      else updateBackupRestoreGate();
+    });
+    const card = el("label", {class: "backup-category"}, [
+      checkbox,
+      el("div", {class: "backup-category-text"}, [
+        el("div", {class: "backup-category-label", text: c.label}),
+        c.caveat ? el("div", {class: "backup-category-caveat", text: c.caveat}) : null,
+      ]),
+    ]);
+    if (disabled) card.style.opacity = "0.5";
+    host.appendChild(card);
+  }
+}
+
+$("backup-export-back").addEventListener("click", () => setScreen("backup-mode"));
+
+$("backup-export-recheck").addEventListener("click", async () => {
+  await loadZenProfiles();
+  await updateBackupExportGate();
+});
+
+$("backup-export-quit-zen").addEventListener("click", async () => {
+  const api = await whenBridgeReady();
+  setLoading($("backup-export-quit-zen"), true, "Quitting");
+  try { await api.quit_browser("zen"); } catch (e) { /* best-effort */ }
+  setLoading($("backup-export-quit-zen"), false);
+  await updateBackupExportGate();
+});
+
+async function updateBackupExportGate() {
+  const issues = [];
+  if (!backupState.exportProfilePath) issues.push("No Zen profile found.");
+  if (backupState.exportIncludes.size === 0) issues.push("Pick at least one category to include.");
+  let zenRunning = false;
+  const api = Bridge();
+  if (api) {
+    try { zenRunning = await api.is_zen_running(); } catch (e) { /* assume not running */ }
+  }
+  if (zenRunning) issues.unshift("Zen is running — quit it before exporting so SQLite files snapshot cleanly.");
+
+  const gate = $("backup-export-gate");
+  const text = $("backup-export-gate-text");
+  const go = $("backup-export-go");
+  const quitBtn = $("backup-export-quit-zen");
+  quitBtn.style.display = zenRunning ? "" : "none";
+  if (issues.length === 0) {
+    gate.style.display = "none";
+    go.disabled = false;
+  } else {
+    gate.style.display = "";
+    text.textContent = issues.join(" ");
+    go.disabled = true;
+  }
+}
+
+$("backup-export-go").addEventListener("click", async () => {
+  const api = await whenBridgeReady();
+  // Open the save dialog now, then kick off the export. If the user
+  // cancels, stay on this screen.
+  const filename = "zen-backup-" + new Date().toISOString().slice(0, 10) + ".zenbackup";
+  setLoading($("backup-export-go"), true, "Choosing");
+  const chosen = await api.choose_path("save", filename);
+  setLoading($("backup-export-go"), false);
+  if (!chosen) return;
+  backupState.exportOutputPath = chosen;
+  const includes = JSON.stringify([...backupState.exportIncludes]);
+  setLoading($("backup-export-go"), true, "Exporting");
+  await api.start_zen_export(
+    backupState.exportProfilePath,
+    backupState.exportOutputPath,
+    includes,
+  );
+  setLoading($("backup-export-go"), false);
+  state.steps = ["snapshot", "bundle", "finalize"];
+  state.stepLabels = {
+    snapshot: "Reading the Zen profile",
+    bundle: "Writing the archive",
+    finalize: "Finalising",
+  };
+  startProgressPolling();
+});
+
+// ---- restore --------------------------------------------------------------
+
+async function goToBackupRestore() {
+  setScreen("backup-restore");
+  backupState.mode = "restore";
+  backupState.restoreArchivePath = null;
+  backupState.restoreTargetPath = null;
+  backupState.restoreIncludes = new Set();
+  backupState.restoreManifest = null;
+  $("backup-restore-path").textContent = "No file chosen yet.";
+  $("backup-restore-path").classList.add("muted");
+  $("backup-restore-manifest-row").style.display = "none";
+  await renderBackupRestoreProfiles();
+  await renderBackupCategories("restore");
+  await updateBackupRestoreGate();
+}
+
+async function renderBackupRestoreProfiles() {
+  const profiles = await loadZenProfiles();
+  const sel = $("backup-restore-profile");
+  clear(sel);
+  if (!profiles.length) {
+    sel.appendChild(el("option", {value: "", text: "No Zen profile found"}));
+    sel.disabled = true;
+    backupState.restoreTargetPath = null;
+    return;
+  }
+  sel.disabled = false;
+  for (const p of profiles) {
+    sel.appendChild(el("option", {
+      value: p.path,
+      text: p.name,
+    }));
+  }
+  backupState.restoreTargetPath = profiles[0].path;
+  sel.onchange = () => {
+    backupState.restoreTargetPath = sel.value;
+    updateBackupRestoreGate();
+  };
+}
+
+$("backup-restore-pick").addEventListener("click", async () => {
+  const api = await whenBridgeReady();
+  const chosen = await api.choose_path("open");
+  if (!chosen) return;
+  backupState.restoreArchivePath = chosen;
+  $("backup-restore-path").textContent = chosen;
+  $("backup-restore-path").classList.remove("muted");
+
+  const preview = await api.preview_zen_backup(chosen);
+  if (preview.ok) {
+    backupState.restoreManifest = preview.manifest;
+    renderBackupRestoreManifest(preview.manifest);
+    await renderBackupCategories("restore");
+  } else {
+    backupState.restoreManifest = null;
+    $("backup-restore-manifest-row").style.display = "";
+    const host = $("backup-restore-manifest");
+    clear(host);
+    host.appendChild(el("span", {class: "muted",
+      text: "Couldn't read this archive: " + (preview.errors || []).join(", ")}));
+  }
+  updateBackupRestoreGate();
+});
+
+function renderBackupRestoreManifest(manifest) {
+  $("backup-restore-manifest-row").style.display = "";
+  const host = $("backup-restore-manifest");
+  clear(host);
+  const includedNice = (manifest.included || []).join(", ");
+  host.appendChild(el("div", {}, [
+    el("span", {class: "name", text: manifest.source_profile_name || "Zen profile"}),
+    el("span", {text: ", exported " + (manifest.exported_at || "")}),
+  ]));
+  host.appendChild(el("div", {class: "muted", style: "font-size: var(--fs-tiny);",
+    text: "Includes: " + includedNice}));
+  host.appendChild(el("div", {class: "muted", style: "font-size: var(--fs-tiny);",
+    text: "Format v" + (manifest.format_version || "?")
+          + " · browser2zen " + (manifest.browser2zen_version || "?")}));
+}
+
+$("backup-restore-back").addEventListener("click", () => setScreen("backup-mode"));
+
+$("backup-restore-recheck").addEventListener("click", async () => {
+  await loadZenProfiles();
+  await updateBackupRestoreGate();
+});
+
+$("backup-restore-quit-zen").addEventListener("click", async () => {
+  const api = await whenBridgeReady();
+  setLoading($("backup-restore-quit-zen"), true, "Quitting");
+  try { await api.quit_browser("zen"); } catch (e) { /* best-effort */ }
+  setLoading($("backup-restore-quit-zen"), false);
+  await updateBackupRestoreGate();
+});
+
+async function updateBackupRestoreGate() {
+  const issues = [];
+  if (!backupState.restoreArchivePath) issues.push("Pick a .zenbackup file.");
+  else if (!backupState.restoreManifest) issues.push("That archive is unreadable.");
+  if (!backupState.restoreTargetPath) issues.push("No target Zen profile found.");
+  if (backupState.restoreManifest && backupState.restoreIncludes.size === 0) {
+    issues.push("Pick at least one category to restore.");
+  }
+  let zenRunning = false;
+  const api = Bridge();
+  if (api) {
+    try { zenRunning = await api.is_zen_running(); } catch (e) { /* assume not running */ }
+  }
+  if (zenRunning) issues.unshift("Zen is running — quit it before restoring so the writes don't fight live reads.");
+
+  const gate = $("backup-restore-gate");
+  const text = $("backup-restore-gate-text");
+  const go = $("backup-restore-go");
+  const quitBtn = $("backup-restore-quit-zen");
+  quitBtn.style.display = zenRunning ? "" : "none";
+  if (issues.length === 0) {
+    gate.style.display = "none";
+    go.disabled = false;
+  } else {
+    gate.style.display = "";
+    text.textContent = issues.join(" ");
+    go.disabled = true;
+  }
+}
+
+$("backup-restore-go").addEventListener("click", async () => {
+  const api = await whenBridgeReady();
+  const includes = JSON.stringify([...backupState.restoreIncludes]);
+  setLoading($("backup-restore-go"), true, "Restoring");
+  await api.start_zen_restore(
+    backupState.restoreArchivePath,
+    backupState.restoreTargetPath,
+    includes,
+  );
+  setLoading($("backup-restore-go"), false);
+  state.steps = ["preflight", "restore", "finalize"];
+  state.stepLabels = {
+    preflight: "Validating the archive",
+    restore: "Restoring files",
+    finalize: "Finalising",
+  };
+  startProgressPolling();
+});
+
+// Helper: kick off the progress poller for a non-migration job. Reuses
+// the migrate flow's renderProgress() + pollProgress() since both read
+// the same step / event shape from drain_progress.
+function startProgressPolling() {
+  setScreen("progress");
+  state.stepStates = {};
+  state.stepSummaries = {};
+  state.logLines = [];
+  state.activeStep = null;
+  state.activeDetail = "";
+  state.activeProgress = null;
+  state.startedAt = Date.now();
+  if (state.elapsedHandle) clearInterval(state.elapsedHandle);
+  state.elapsedHandle = setInterval(updateElapsed, 1000);
+  updateElapsed();
+  renderProgress();
+  if (state.pollHandle) clearInterval(state.pollHandle);
+  state.pollHandle = setInterval(pollProgress, 120);
+}
+
+// Screenshot harness hook. The Playwright runner sets `window.__SHOOT__`
+// in addInitScript before navigating, which lets it reach into the
+// closure-captured app state to seed each screen deterministically.
+// Stays a no-op in production because nothing outside docs/screenshots
+// ever sets that flag.
+if (typeof window !== "undefined" && window.__SHOOT__) {
+  window.__shoot = {
+    state, backupState,
+    setScreen, finishOk,
+    runSourcePicker, runDetect,
+    goToBackupExport, goToBackupRestore,
+    decorateBranding, setAppVersion, setPlatformAttribute,
+  };
+}

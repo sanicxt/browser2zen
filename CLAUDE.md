@@ -74,6 +74,32 @@ heavy ones reverse-engineer Firefox internals:
 - **Container cookies** need `^userContextId=N` duplicates per
   container so cookies are visible to per-space tabs.
 
+### Backup/restore (`src/zen_backup.py`)
+
+Independent of the migration pipeline. Two classes, ~330 lines total:
+
+- `ZenBackupExporter(zen_profile, output_path, includes)` — snapshots
+  SQLite + WAL/SHM siblings via the same temp-dir pattern
+  `chromium_history_importer._snapshot` uses, copies the rest verbatim,
+  writes a `manifest.json` with `format_version`, `browser2zen_version`,
+  `source_profile_name`, and the included category list, then tar-gzips
+  the whole staging dir to `<name>.zenbackup`.
+- `ZenBackupImporter(archive_path, target_zen_profile, includes)` —
+  validates the manifest version, takes a `.backup.<ts>` snapshot of
+  each existing target file before overwriting, drops stale `-wal`/`-shm`
+  siblings so SQLite re-reads cleanly, writes a `.browser2zen-restored`
+  marker (sibling to `.browser2zen-migrated`).
+
+The categories live in `CATEGORY_FILES` — a dict mapping `workspaces`,
+`browsing`, `cookies`, `favicons`, `passwords`, `prefs`, `extensions`
+to the file globs that belong to each. `DEFAULT_CATEGORIES` is the
+on-by-default subset (the first four — the riskier ones default off).
+
+Bridge methods follow the same worker-thread + `ProgressBus` pattern
+as `start_migration`: `start_zen_export`, `start_zen_restore`,
+`preview_zen_backup`, plus `choose_path` (a wrapper around
+`webview.create_file_dialog` for save/open dialogs).
+
 ### Chromium readers (`src/chromium_*.py`, `src/zen_favicon_importer.py`)
 
 - `chromium_history_importer.py` — Chromium `History` SQLite → Firefox

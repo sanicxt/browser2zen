@@ -140,6 +140,34 @@ inside the app lets you restore or delete those backups any time.
 
 ---
 
+## Backup and restore
+
+browser2zen also doubles as a portable Zen profile mover. From the
+welcome screen, click **Backup or restore Zen** and pick a direction:
+
+- **Export** bundles your current Zen profile into a single
+  `.zenbackup` file (gzipped tarball with a `manifest.json`). Pick which
+  categories to include — workspaces, browsing data, login state and
+  favicons are on by default; saved passwords, preferences and
+  extensions are opt-in because they're more fragile across machines.
+- **Restore** opens an existing `.zenbackup` and writes its contents
+  into a Zen profile on this machine. Each target file gets a
+  timestamped backup before it's overwritten.
+
+Use it to migrate a Zen profile to a new laptop, fork a profile for
+testing, or hand a friend your setup as a single file.
+
+```
+~/Downloads/zen-backup-2026-05-07.zenbackup    # 17–125 MB depending on what's included
+```
+
+Zen must be quit on both ends — the export reads SQLite databases that
+WAL-lock under live writes, and the restore writes into files Zen
+expects to own. The GUI surfaces a "Quit Zen" button when it detects
+Zen is running.
+
+---
+
 ## Run from source
 
 For Linux, Intel Mac, contributors, or anyone who'd rather skip the DMG:
