@@ -37,12 +37,21 @@ terminal, no Python, no install steps to follow.
 
 ## Install
 
-Open the [latest release](./releases/latest) and pick the artifact
-for your OS.
+### macOS (Apple Silicon) — Homebrew (recommended)
 
-### macOS (Apple Silicon)
+```bash
+brew tap tarikbc/tap
+brew install --cask browser2zen
+```
 
-1. Download `browser2zen-x.y.z-arm64.dmg`.
+Launch from Spotlight or `/Applications` afterwards. On first run macOS
+will show one "Open Anyway" prompt; see the [Privacy & Security
+flow](#macos-apple-silicon--manual-dmg) below for the exact path.
+
+### macOS (Apple Silicon) — manual DMG
+
+1. Download `browser2zen-x.y.z-arm64.dmg` from the
+   [latest release](./releases/latest).
 2. Double-click the DMG to mount it, then double-click `browser2zen.app`.
 3. macOS will show a dialog ("damaged" or "cannot verify"). Click
    **Done**. Do **not** click "Move to Trash".
