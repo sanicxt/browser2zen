@@ -89,10 +89,19 @@ def _materialise_zen(home: Path) -> Path:
 
 @pytest.fixture
 def fake_home(tmp_path, monkeypatch):
-    """Redirect Path.home() to a tmpdir for the duration of one test."""
+    """Redirect Path.home() to a tmpdir + force ``sys.platform == 'darwin'``
+    for the duration of one test.
+
+    The platform pin is what makes the suite portable across OSes:
+    every extractor's path lookup and every is_installed() check
+    branches on ``sys.platform``, and our fixture trees only mirror the
+    macOS layout. Without this pin, CI on Linux would look at
+    ``~/.config/google-chrome`` and find nothing.
+    """
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "darwin")
     return home
 
 
