@@ -1,5 +1,5 @@
-# Build dist/Arc2Zen/ from app/ + src/ + the PyInstaller spec.
-# Outputs a folder containing Arc2Zen.exe and its _internal/ runtime
+# Build dist/browser2zen/ from app/ + src/ + the PyInstaller spec.
+# Outputs a folder containing browser2zen.exe and its _internal/ runtime
 # (the ship artifact). No code-signing.
 $ErrorActionPreference = 'Stop'
 
@@ -12,15 +12,15 @@ try {
     }
 
     Write-Host '==> pyinstaller'
-    & pyinstaller --noconfirm --clean 'build/arc2zen.spec'
+    & pyinstaller --noconfirm --clean 'build/browser2zen.spec'
     if ($LASTEXITCODE -ne 0) { throw "pyinstaller failed" }
 
-    if (-not (Test-Path 'dist/Arc2Zen/Arc2Zen.exe')) {
-        throw "expected dist/Arc2Zen/Arc2Zen.exe to exist"
+    if (-not (Test-Path 'dist/browser2zen/browser2zen.exe')) {
+        throw "expected dist/browser2zen/browser2zen.exe to exist"
     }
 
-    $size = (Get-ChildItem -Recurse 'dist/Arc2Zen' | Measure-Object -Property Length -Sum).Sum
-    Write-Host ("==> done: dist/Arc2Zen/Arc2Zen.exe ({0:N1} MB unpacked)" -f ($size / 1MB))
+    $size = (Get-ChildItem -Recurse 'dist/browser2zen' | Measure-Object -Property Length -Sum).Sum
+    Write-Host ("==> done: dist/browser2zen/browser2zen.exe ({0:N1} MB unpacked)" -f ($size / 1MB))
 } finally {
     Pop-Location
 }

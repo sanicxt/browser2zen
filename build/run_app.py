@@ -25,7 +25,7 @@ def main() -> int:
     _bootstrap_path()
     from app.window import launch  # imported after sys.path is fixed
 
-    parser = argparse.ArgumentParser(prog="Arc2Zen")
+    parser = argparse.ArgumentParser(prog="browser2zen")
     parser.add_argument("--debug", action="store_true",
                         help="Enable WebKit devtools and verbose logging")
     args = parser.parse_args()

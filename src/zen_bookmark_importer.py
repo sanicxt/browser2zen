@@ -133,7 +133,7 @@ class ZenBookmarkImporter:
             logger.error(f"❌ Failed to backup database: {e}")
             return False
 
-    def import_arc_bookmarks(self, arc_export_data: Dict, dry_run: bool = False) -> bool:
+    def import_bookmarks(self, export_data: Dict, dry_run: bool = False) -> bool:
         """Import Arc bookmarks into Zen database."""
         if not self.check_zen_database():
             return False
@@ -156,7 +156,7 @@ class ZenBookmarkImporter:
             skipped_count = 0
 
             # Process each Arc space
-            for space_data in arc_export_data.get('spaces', []):
+            for space_data in export_data.get('spaces', []):
                 if not space_data['pinned_tabs']:
                     logger.info(f"⚪ Skipping {space_data['space_name']} - no pinned tabs")
                     continue
@@ -484,9 +484,9 @@ def main():
         return
 
     with open(export_file, 'r') as f:
-        arc_data = json.load(f)
+        export_data = json.load(f)
 
-    total_bookmarks = sum(len(p['bookmarks']) for p in arc_data['profiles'])
+    total_bookmarks = sum(len(p['bookmarks']) for p in export_data['profiles'])
     print(f"📚 Found {total_bookmarks} Arc bookmarks to import")
 
     # Create importer
@@ -500,7 +500,7 @@ def main():
 
     # Perform dry run first
     print("\n🧪 Performing dry run...")
-    if not importer.import_arc_bookmarks(arc_data, dry_run=True):
+    if not importer.import_bookmarks(export_data, dry_run=True):
         print("❌ Dry run failed!")
         return
 
@@ -512,7 +512,7 @@ def main():
 
     # Perform actual import
     print("\n📥 Importing bookmarks...")
-    if importer.import_arc_bookmarks(arc_data, dry_run=False):
+    if importer.import_bookmarks(export_data, dry_run=False):
         print("\n🎉 Import completed successfully!")
         print("You can now open Zen browser to see your Arc bookmarks in the 'Unfiled Bookmarks' section.")
     else:

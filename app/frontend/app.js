@@ -1,4 +1,4 @@
-/* Arc2Zen frontend: vanilla JS state machine.
+/* browser2zen frontend: vanilla JS state machine.
  *
  * All dynamic content is built with createElement / textContent. We never
  * assign user-derived strings (or strings that could embed user data) to
@@ -55,13 +55,15 @@ function setScreen(name) {
 const state = {
   env: null,
   selectedZenProfile: null,
+  source: { name: "arc", displayName: "Arc" },  // current source-browser
+  sources: [],                                   // catalogue from list_sources()
   preview: null,
   options: {
     foldersCollapsed: true,
     includeWorkspaces: true,
-    includePinnedTabs: true,
     includeBookmarks: true,
     includeFavicons: true,
+    includePinnedTabs: true,
     includeOpenTabs: true,
     includeHistory: false,
     includeCookies: false,
@@ -101,49 +103,30 @@ function setLoading(btn, on, label = null) {
   }
 }
 
-// ---- brand marks (Arc / Zen) --------------------------------------------
+// ---- brand marks --------------------------------------------------------
 //
-// Inline SVG glyphs rendered over a CSS-gradient badge.
-// Sizes: default 56px (welcome hero), small 28px (cards).
+// Brand glyphs are real official logos served from
+// ``app/frontend/assets/sources/<name>.svg`` (Wikimedia Commons + simpleicons,
+// see assets/sources/README.md for attributions). The wrapper span carries
+// the brand-tinted background (CSS); the <img> sits centred on top.
+//
+// Sizes:
+//   default — 56 px, used in the welcome hero strip
+//   small   — 32 px, used in the source picker + detect cards
+//   tiny    — 22 px, used inline (e.g. progress meta)
 
-// Arc Browser logo paths (CC-licensed source: Wikimedia Commons,
-// File:Arc_(browser)_logo.svg). Native viewBox "0 0 82 68"; we add a
-// small padding so the mark sits with breathing room inside the badge.
-const ARC_PATHS = [
-  ["#1a007f", "m28.8 51.97 6.35-13.36c-4.85-1.03-9.73-4.03-12.49-7.68l-6.64 13.96c3.69 3.13 8.12 5.59 12.78 7.08"],
-  ["#4e000a", "M55.3 30.53c-3.19 3.91-7.62 6.81-12.36 7.94l6.33 13.32c4.62-1.56 8.94-4.08 12.67-7.31L55.3 30.53z"],
-  ["#1a007f", "m16.02 44.89-3.32 6.98c-1.69 3.55-.42 7.92 3.06 9.77 3.69 1.96 8.23.43 10.01-3.3l3.03-6.37a37.885 37.885 0 0 1-12.78-7.08"],
-  ["#ff9396", "M68.48 15.29a7.29 7.29 0 0 0-8.58 5.72c-.7 3.5-2.34 6.76-4.6 9.53l6.63 13.96c6.12-5.31 10.64-12.54 12.26-20.63.79-3.96-1.77-7.8-5.71-8.58"],
-  ["#002dc8", "M42.94 38.47c-1.42.34-2.87.52-4.32.52-1.13 0-2.3-.13-3.47-.38-4.85-1.03-9.73-4.03-12.49-7.68-.69-.91-1.25-1.86-1.64-2.83-1.51-3.73-5.76-5.53-9.49-4.03C7.8 25.58 6 29.83 7.5 33.56c1.71 4.24 4.73 8.13 8.52 11.33a37.84 37.84 0 0 0 12.77 7.08c3.21 1.03 6.54 1.6 9.82 1.6 3.64 0 7.23-.63 10.65-1.78l-6.32-13.32z"],
-  ["#ff536a", "m65.43 51.84-3.5-7.36-6.63-13.95-.01.01s0-.01.01-.01l-9.64-20.28a7.292 7.292 0 0 0-6.58-4.16c-2.81 0-5.37 1.62-6.58 4.16l-9.83 20.68c2.76 3.65 7.64 6.65 12.49 7.68l3.18-6.68c.3-.63 1.2-.63 1.5 0l3.11 6.54h.02-.02l6.33 13.32 3.11 6.54a7.28 7.28 0 0 0 6.59 4.16c.65 0 1.3-.09 1.94-.27 4.39-1.21 6.47-6.26 4.51-10.38"],
-];
+const SOURCE_NAMES = ["arc", "chrome", "edge", "brave", "firefox", "safari"];
 
-function makeArcMark(size = "default") {
+function makeBrowserMark(name, size = "default") {
   const wrap = document.createElement("span");
-  wrap.className = `brand-mark arc${size === "small" ? " small" : ""}${size === "tiny" ? " tiny" : ""}`;
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "-6 -7 94 82");
-  svg.setAttribute("fill", "none");
-  for (const [fill, d] of ARC_PATHS) {
-    svgChild(svg, "path", {d, fill, "fill-rule": "evenodd", "clip-rule": "evenodd"});
-  }
-  wrap.appendChild(svg);
-  return wrap;
-}
-
-function makeZenMark(size = "default") {
-  const wrap = document.createElement("span");
-  wrap.className = `brand-mark zen${size === "small" ? " small" : ""}${size === "tiny" ? " tiny" : ""}`;
-  const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 32 32");
-  svg.setAttribute("fill", "none");
-  // Three hollow concentric rings, thin white stroke, empty centre.
-  const cx = 16, cy = 16;
-  for (const r of [12, 8, 4]) {
-    svgChild(svg, "circle", {cx, cy, r,
-      stroke: "currentColor", "stroke-width": 1.3, fill: "none"});
-  }
-  wrap.appendChild(svg);
+  const sizeClass = size === "small" ? " small" : (size === "tiny" ? " tiny" : "");
+  wrap.className = `brand-mark ${name}${sizeClass}`;
+  const img = document.createElement("img");
+  img.src = `assets/sources/${name}.svg`;
+  img.alt = "";        // decorative; the surrounding label carries the name
+  img.setAttribute("aria-hidden", "true");
+  img.draggable = false;
+  wrap.appendChild(img);
   return wrap;
 }
 
@@ -156,24 +139,58 @@ function makeArrowGlyph() {
 
 // Decorate static placeholders on welcome + detect.
 function decorateBranding() {
+  // Welcome hero: every supported source on the left, arrow, Zen on the
+  // right. Conveys multi-source support at a glance.
   const pair = $("brand-pair");
   if (pair && !pair.firstChild) {
-    pair.appendChild(makeArcMark());
+    const sources = document.createElement("span");
+    sources.className = "brand-source-row";
+    for (const name of SOURCE_NAMES) {
+      sources.appendChild(makeBrowserMark(name, "small"));
+    }
+    const zenHero = makeBrowserMark("zen");
+    zenHero.id = "welcome-zen-mark";
+    pair.appendChild(sources);
     pair.appendChild(makeArrowGlyph());
-    pair.appendChild(makeZenMark());
+    pair.appendChild(zenHero);
+    wireMergeEasterEgg(zenHero, sources);
   }
-  const arcMark = $("arc-mark");
-  if (arcMark) {
-    const fresh = makeArcMark("small");
-    fresh.id = "arc-mark";
-    arcMark.replaceWith(fresh);
+  // Source-card on the detect screen: the chosen source's mark.
+  const srcMark = $("source-mark");
+  if (srcMark) {
+    const srcName = (state.source && state.source.name) || "arc";
+    const fresh = makeBrowserMark(srcName, "small");
+    fresh.id = "source-mark";
+    srcMark.replaceWith(fresh);
   }
+  // Zen card on the detect screen.
   const zenMark = $("zen-mark");
   if (zenMark) {
-    const fresh = makeZenMark("small");
+    const fresh = makeBrowserMark("zen", "small");
     fresh.id = "zen-mark";
     zenMark.replaceWith(fresh);
   }
+}
+
+// Easter egg: clicking the welcome Zen logo plays a quick merge
+// animation — each source badge slides into Zen with a 60 ms stagger,
+// Zen gives one warm pulse, then everything snaps back. Visualises
+// what the app actually does. Cooldown blocks re-trigger until the
+// previous run finishes.
+function wireMergeEasterEgg(zenMark, sourceRow) {
+  let cooldown = false;
+  zenMark.style.cursor = "pointer";
+  zenMark.addEventListener("click", () => {
+    if (cooldown) return;
+    cooldown = true;
+    sourceRow.classList.add("is-merging");
+    zenMark.classList.add("is-merging");
+    setTimeout(() => {
+      sourceRow.classList.remove("is-merging");
+      zenMark.classList.remove("is-merging");
+      cooldown = false;
+    }, 1800);
+  });
 }
 
 // ---- titlebar -------------------------------------------------------------
@@ -184,45 +201,142 @@ $("tl-close").addEventListener("click", async () => {
 
 // ---- welcome --------------------------------------------------------------
 
-$("welcome-go").addEventListener("click", () => goToDetect());
+$("welcome-go").addEventListener("click", () => goToSourcePicker());
+
+async function goToSourcePicker() {
+  setScreen("source");
+  await runSourcePicker();
+}
 
 async function goToDetect() {
   setScreen("detect");
   await runDetect();
 }
 
+// ---- source picker --------------------------------------------------------
+
+async function runSourcePicker() {
+  const api = await whenBridgeReady();
+  let sources;
+  try {
+    sources = await api.list_sources();
+  } catch (e) {
+    sources = [{ name: "arc", displayName: "Arc", installed: true, running: false }];
+  }
+  state.sources = Array.isArray(sources) ? sources : [];
+  renderSourcePicker(state.sources);
+}
+
+function renderSourcePicker(sources) {
+  const grid = $("source-grid");
+  clear(grid);
+
+  // Pre-select the current source if it's in the list and installed,
+  // otherwise pick the first installed one.
+  const installedNames = sources.filter(s => s.installed).map(s => s.name);
+  let pick = state.source && installedNames.includes(state.source.name)
+    ? state.source.name
+    : (installedNames[0] || null);
+  state.source = sources.find(s => s.name === pick) || state.source;
+
+  for (const s of sources) {
+    const card = el("button", {
+      class: "source-card",
+      type: "button",
+      dataset: { name: s.name, installed: String(!!s.installed), selected: String(s.name === pick) },
+    }, [
+      makeBrowserMark(s.name, "small"),
+      el("div", { class: "source-card-text" }, [
+        el("div", { class: "source-card-name" }, [s.displayName || s.name]),
+        el("div", {
+          class: "source-card-status " + (s.installed ? (s.running ? "is-warn" : "is-ok") : "is-dim"),
+        }, [s.installed ? (s.running ? "Running" : "Installed") : "Not found"]),
+      ]),
+    ]);
+    if (s.installed) {
+      card.addEventListener("click", () => selectSource(s.name));
+    } else {
+      card.disabled = true;
+    }
+    grid.appendChild(card);
+  }
+  $("source-next").disabled = !pick;
+}
+
+function selectSource(name) {
+  const picked = state.sources.find(s => s.name === name);
+  if (!picked || !picked.installed) return;
+  state.source = picked;
+  for (const card of $$("#source-grid .source-card")) {
+    card.dataset.selected = String(card.dataset.name === name);
+  }
+  $("source-next").disabled = false;
+}
+
+$("source-back").addEventListener("click", () => setScreen("welcome"));
+$("source-next").addEventListener("click", async () => {
+  const api = await whenBridgeReady();
+  if (!state.source) return;
+  const result = await api.set_source(state.source.name);
+  if (!result || result.ok === false) {
+    // Best-effort fallback: still navigate; the Detect screen will
+    // surface the error.
+  } else {
+    state.source = {
+      name: result.name, displayName: result.displayName,
+      installed: !!result.installed, running: !!result.running,
+    };
+  }
+  await goToDetect();
+});
+
 // ---- detect ---------------------------------------------------------------
 
 async function runDetect() {
   const api = await whenBridgeReady();
-  $("arc-pill").textContent = "Detecting…";
+  $("source-pill").textContent = "Detecting…";
   $("zen-pill").textContent = "Detecting…";
   state.env = await api.check_env();
   renderDetect(state.env);
 }
 
 function renderDetect(env) {
-  // Arc card
-  const arcOk = env.arcInstalled && !env.arcRunning && env.arcProfiles.length > 0;
-  const arcPill = $("arc-pill");
-  const arcDetail = $("arc-detail");
-  const arcCard = $("card-arc");
-  $("arc-running-row").style.display = env.arcRunning ? "" : "none";
+  // Source-browser card (Arc / Chrome / etc.). The DOM ids start with
+  // "arc-" for legacy reasons; the field names on env are also "arc*"
+  // but they describe whichever source is currently selected.
+  const srcName = (state.source && state.source.displayName) || "Arc";
+  const srcKey = (state.source && state.source.name) || "arc";
+  const sourceCardName = $("source-card-name");
+  if (sourceCardName) sourceCardName.textContent = srcName;
+  // Refresh the brand mark to match the chosen source.
+  const srcMark = $("source-mark");
+  if (srcMark) {
+    const fresh = makeBrowserMark(srcKey, "small");
+    fresh.id = "arc-mark";
+    srcMark.replaceWith(fresh);
+  }
+  const srcOk = env.sourceInstalled && !env.sourceRunning && env.sourceProfiles.length > 0;
+  const srcPill = $("source-pill");
+  const srcDetail = $("source-detail");
+  const srcCard = $("card-source");
+  $("source-running-row").style.display = env.sourceRunning ? "" : "none";
+  const quitBtn = $("source-quit-btn");
+  if (quitBtn) quitBtn.textContent = `Quit ${srcName}`;
 
-  arcCard.dataset.ok = arcOk ? "true" : "false";
-  if (!env.arcInstalled) {
-    arcPill.className = "pill pill-err"; arcPill.textContent = "Not found";
-    arcDetail.textContent = "We couldn't find Arc data in ~/Library/Application Support/Arc.";
-  } else if (env.arcRunning) {
-    arcPill.className = "pill pill-warn"; arcPill.textContent = "Running";
-    arcDetail.textContent = "Arc is open. Quit it before we read its data.";
-  } else if (env.arcProfiles.length === 0) {
-    arcPill.className = "pill pill-warn"; arcPill.textContent = "Empty";
-    arcDetail.textContent = "Arc is installed but no profiles were found.";
+  srcCard.dataset.ok = srcOk ? "true" : "false";
+  if (!env.sourceInstalled) {
+    srcPill.className = "pill pill-err"; srcPill.textContent = "Not found";
+    srcDetail.textContent = `We couldn't find ${srcName} data on this machine.`;
+  } else if (env.sourceRunning) {
+    srcPill.className = "pill pill-warn"; srcPill.textContent = "Running";
+    srcDetail.textContent = `${srcName} is open. Quit it before we read its data.`;
+  } else if (env.sourceProfiles.length === 0) {
+    srcPill.className = "pill pill-warn"; srcPill.textContent = "Empty";
+    srcDetail.textContent = `${srcName} is installed but no profiles were found.`;
   } else {
-    arcPill.className = "pill pill-ok"; arcPill.textContent = "Ready";
-    const n = env.arcProfiles.length;
-    arcDetail.textContent = `${n} profile${n === 1 ? "" : "s"}: ${env.arcProfiles.join(", ")}.`;
+    srcPill.className = "pill pill-ok"; srcPill.textContent = "Ready";
+    const n = env.sourceProfiles.length;
+    srcDetail.textContent = `${n} profile${n === 1 ? "" : "s"}: ${env.sourceProfiles.join(", ")}.`;
   }
 
   // Zen card
@@ -271,11 +385,12 @@ function updateGate(env) {
   const gate = $("detect-gate");
   const text = $("detect-gate-text");
   const next = $("detect-next");
+  const srcName = (state.source && state.source.displayName) || "Arc";
 
   const issues = [];
-  if (!env.arcInstalled) issues.push("Arc isn't installed.");
-  if (env.arcRunning) issues.push("Arc is still running.");
-  if (env.arcInstalled && env.arcProfiles.length === 0) issues.push("Arc has no profiles.");
+  if (!env.sourceInstalled) issues.push(`${srcName} isn't installed.`);
+  if (env.sourceRunning) issues.push(`${srcName} is still running.`);
+  if (env.sourceInstalled && env.sourceProfiles.length === 0) issues.push(`${srcName} has no profiles.`);
   if (!env.zenInstalled) issues.push("Zen isn't installed (or never launched).");
   if (env.zenRunning) issues.push("Zen is still running.");
   if (!env.hasLz4) issues.push("Python lz4 module missing (build issue).");
@@ -291,10 +406,11 @@ function updateGate(env) {
   }
 }
 
-$("arc-quit-btn").addEventListener("click", async () => {
-  const btn = $("arc-quit-btn");
-  setLoading(btn, true, "Quitting Arc");
-  await Bridge().quit_browser("arc"); await sleep(400);
+$("source-quit-btn").addEventListener("click", async () => {
+  const btn = $("source-quit-btn");
+  const srcName = (state.source && state.source.displayName) || "Arc";
+  setLoading(btn, true, `Quitting ${srcName}`);
+  await Bridge().quit_source(); await sleep(400);
   await runDetect();
   setLoading(btn, false);
 });
@@ -306,7 +422,7 @@ $("zen-quit-btn").addEventListener("click", async () => {
   setLoading(btn, false);
 });
 $("detect-recheck").addEventListener("click", () => runDetect());
-$("detect-back").addEventListener("click", () => setScreen("welcome"));
+$("detect-back").addEventListener("click", () => goToSourcePicker());
 $("detect-next").addEventListener("click", () => goToPreview());
 $("zen-install-btn").addEventListener("click", () => {
   const api = Bridge();
@@ -317,7 +433,10 @@ $("zen-install-btn").addEventListener("click", () => {
 
 async function goToPreview() {
   setScreen("preview");
-  replace($("stat-strip"), el("span", {class: "muted", text: "Reading Arc data…"}));
+  replace($("stat-strip"), el("span", {
+    class: "muted",
+    text: `Reading ${(state.source && state.source.displayName) || "Arc"} data…`,
+  }));
   clear($("spaces-list"));
   clear($("toggles"));
 
@@ -476,17 +595,38 @@ function makeStepIcon(step) {
 
 // ---- step descriptions + streaming patterns -----------------------------
 
-const STEP_SUBTITLES = {
-  extract:    "Reading Arc's StorableSidebar.json",
-  containers: "Setting up cookie-isolated containers per space",
-  sessions:   "Writing spaces, pinned tabs and folders to zen-sessions.jsonlz4",
-  bookmarks:  "Mirroring pinned tabs as Firefox bookmarks",
-  favicons:   "Decoding Arc's icon cache and inlining into Zen tabs",
-  open_tabs:  "Creating Zen sessionstore entries",
-  history:    "Copying browsing history into places.sqlite",
-  cookies:    "Decrypting Arc cookies via Keychain and writing to cookies.sqlite",
-  finalize:   "Marking migration complete",
-};
+// Step subtitles are slightly source-aware: extract/favicons/cookies
+// reference the source by name. Everything else describes the Zen-side
+// write path, which is identical regardless of source.
+function stepSubtitle(step) {
+  const src = (state.source && state.source.displayName) || "Arc";
+  const isArc = state.source && state.source.name === "arc";
+  switch (step) {
+    case "extract":
+      return isArc
+        ? "Reading Arc's StorableSidebar.json"
+        : `Reading ${src} bookmarks and profile data`;
+    case "containers":
+      return "Setting up cookie-isolated containers per space";
+    case "sessions":
+      return "Writing spaces, pinned tabs and folders to zen-sessions.jsonlz4";
+    case "bookmarks":
+      return "Mirroring pinned tabs as Firefox bookmarks";
+    case "favicons":
+      return `Decoding ${src}'s icon cache and inlining into Zen tabs`;
+    case "open_tabs":
+      return "Creating Zen sessionstore entries";
+    case "history":
+      return "Copying browsing history into places.sqlite";
+    case "cookies":
+      return `Decrypting ${src} cookies and writing to cookies.sqlite`;
+    case "finalize":
+      return "Marking migration complete";
+    default:
+      return "";
+  }
+}
+const STEP_SUBTITLES = new Proxy({}, { get: (_, step) => stepSubtitle(step) });
 
 // Each pattern returns {detail, percent?} when matched against a log line.
 // We use String.prototype.match (no regex.exec) so it composes cleanly.
@@ -870,7 +1010,7 @@ function humanSize(b) {
 function currentOptionsJson() {
   return JSON.stringify({
     zenProfilePath: state.selectedZenProfile,
-    arcSpaceFilter: null,
+    spaceFilter: null,
     foldersCollapsed: state.options.foldersCollapsed,
     includeWorkspaces: state.options.includeWorkspaces,
     includePinnedTabs: state.options.includePinnedTabs,
@@ -916,7 +1056,7 @@ async function setAppVersion() {
     const v = await api.version();
     if (typeof v === "string" && v) {
       const node = $("ver");
-      if (node) node.textContent = `arc2zen · v${v}`;
+      if (node) node.textContent = `browser2zen · v${v}`;
     }
   } catch (_) { /* best effort */ }
 }

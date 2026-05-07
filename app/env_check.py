@@ -29,11 +29,14 @@ class ZenProfile:
 
 @dataclass(frozen=True)
 class EnvReport:
-    arc_installed: bool
-    arc_data_path: Optional[Path]
+    # Source-browser fields describe whichever source is currently
+    # selected (Arc by default). They were called ``arc_*`` historically.
+    source_installed: bool
+    source_data_path: Optional[Path]
+    source_profiles: list[str]            # subdirectory names with migrate-able data
+    source_running: bool
+    # Arc-only — not populated for other sources.
     arc_storable_sidebar: Optional[Path]
-    arc_profiles: list[str]            # subdirectories under "User Data"
-    arc_running: bool
     zen_installed: bool
     zen_profiles: list[ZenProfile]
     zen_running: bool
@@ -222,7 +225,12 @@ def is_zen_running() -> bool:
 def _previous_migration_detected(zen_profile_path: Optional[Path]) -> bool:
     if zen_profile_path is None:
         return False
-    return (zen_profile_path / ".arc2zen-migrated").is_file()
+    # Honour the legacy ``.arc2zen-migrated`` marker too, so an early
+    # adopter who first ran arc2zen v1.1.2 doesn't get re-migrated.
+    return (
+        (zen_profile_path / ".browser2zen-migrated").is_file()
+        or (zen_profile_path / ".arc2zen-migrated").is_file()
+    )
 
 
 # ---------- module checks ----------
@@ -239,23 +247,47 @@ def _has_module(name: str) -> bool:
 # ---------- public ----------
 
 
-def check_environment() -> EnvReport:
+def check_environment(source=None) -> EnvReport:
+    """Detect source-browser + Zen state.
+
+    ``source`` is an optional :class:`BrowserExtractor` instance. When
+    omitted we fall back to the Arc-specific path lookup so the existing
+    CLI / Arc-only frontend keep working. When provided, all of the
+    ``source_*`` fields on the returned report describe the chosen
+    source — the frontend doesn't have to care which browser is selected.
+    """
     errors: list[str] = []
 
-    arc_user_data = _arc_user_data_dir()
-    arc_sidebar = _arc_storable_sidebar()
-    arc_installed = arc_sidebar is not None
-    arc_profile_names = _arc_profiles(arc_user_data) if arc_installed else []
+    if source is not None:
+        try:
+            installed = source.is_installed()
+            profile_dirs = source.profile_paths()
+            profile_names = [p.name for p in profile_dirs]
+            data_path = profile_dirs[0].parent if profile_dirs else None
+            running = source.is_running()
+        except Exception as exc:
+            errors.append(f"{type(source).__name__} check failed: {exc}")
+            installed = False
+            profile_names = []
+            data_path = None
+            running = False
+        sidebar = None  # only meaningful for Arc
+    else:
+        data_path = _arc_user_data_dir()
+        sidebar = _arc_storable_sidebar()
+        installed = sidebar is not None
+        profile_names = _arc_profiles(data_path) if installed else []
+        running = is_arc_running()
 
     zen_profiles = list_zen_profiles()
     zen_installed = bool(zen_profiles)
 
     return EnvReport(
-        arc_installed=arc_installed,
-        arc_data_path=arc_user_data if arc_installed else None,
-        arc_storable_sidebar=arc_sidebar,
-        arc_profiles=arc_profile_names,
-        arc_running=is_arc_running(),
+        source_installed=installed,
+        source_data_path=data_path if installed else None,
+        source_profiles=profile_names,
+        source_running=running,
+        arc_storable_sidebar=sidebar,
         zen_installed=zen_installed,
         zen_profiles=zen_profiles,
         zen_running=is_zen_running(),
@@ -271,11 +303,10 @@ def check_environment() -> EnvReport:
 def env_report_to_dict(report: EnvReport) -> dict:
     """JSON-serializable shape for the JS bridge."""
     return {
-        "arcInstalled": report.arc_installed,
-        "arcDataPath": str(report.arc_data_path) if report.arc_data_path else None,
-        "arcStorableSidebar": str(report.arc_storable_sidebar) if report.arc_storable_sidebar else None,
-        "arcProfiles": list(report.arc_profiles),
-        "arcRunning": report.arc_running,
+        "sourceInstalled": report.source_installed,
+        "sourceDataPath": str(report.source_data_path) if report.source_data_path else None,
+        "sourceProfiles": list(report.source_profiles),
+        "sourceRunning": report.source_running,
         "zenInstalled": report.zen_installed,
         "zenProfiles": [
             {

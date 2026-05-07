@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=760, initial-scale=1" />
-  <title>Arc2Zen</title>
+  <title>browser2zen</title>
   <link rel="stylesheet" href="tokens.css" />
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -16,7 +16,7 @@
       <button class="tl-min" id="tl-min" aria-label="Minimize" disabled></button>
       <button class="tl-max" id="tl-max" aria-label="Maximize" disabled></button>
     </div>
-    <span class="ver" id="ver">arc2zen</span>
+    <span class="ver" id="ver">browser2zen</span>
   </div>
 
   <main>
@@ -24,7 +24,7 @@
     <section class="screen" id="screen-welcome">
       <div class="hero">
         <div class="brand-pair" id="brand-pair"></div>
-        <p class="eyebrow">Arc → Zen</p>
+        <p class="eyebrow" id="welcome-eyebrow">Browser → Zen</p>
         <h1 class="display">Move your browser, keep your setup.</h1>
         <p class="muted" style="margin-top: var(--space-3); max-width: 520px; line-height: 1.5;">
           Spaces, pinned tabs, folders, favicons, bookmarks. Optionally history and
@@ -35,28 +35,42 @@
         <button class="btn btn-primary" id="welcome-go">Let's go</button>
       </div>
       <div class="footer">
-        <span>arc2zen · open source</span>
+        <span id="footer-brand">browser2zen · open source</span>
         <button class="link-btn" id="open-backups">Manage backups</button>
         <span>macOS · arm64</span>
       </div>
     </section>
 
+    <!-- ============================================ source picker -->
+    <section class="screen" id="screen-source">
+      <p class="eyebrow">Step 1 of 4</p>
+      <h1 class="h1">Which browser are you moving from?</h1>
+      <p class="muted" style="margin-top: 4px;">Pick one. Browsers we don't see installed are dimmed.</p>
+
+      <div class="source-grid" id="source-grid"></div>
+
+      <div class="actions-row">
+        <button class="btn btn-ghost" id="source-back">Back</button>
+        <button class="btn btn-primary" id="source-next" disabled>Continue</button>
+      </div>
+    </section>
+
     <!-- ============================================ detect -->
     <section class="screen" id="screen-detect">
-      <p class="eyebrow">Step 1 of 3</p>
+      <p class="eyebrow">Step 2 of 4</p>
       <h1 class="h1">Let's find your browsers.</h1>
       <p class="muted" style="margin-top: 4px;">Both browsers must be quit before we can read and write their data safely.</p>
 
       <div class="detect-grid">
-        <div class="browser-card" id="card-arc" data-ok="false">
+        <div class="browser-card" id="card-source" data-ok="false">
           <div class="card-head">
-            <span class="brand-mark" id="arc-mark"></span>
-            <span class="h2">Arc</span>
-            <span class="pill pill-warn" id="arc-pill">Detecting…</span>
+            <span class="brand-mark" id="source-mark"></span>
+            <span class="h2" id="source-card-name">Arc</span>
+            <span class="pill pill-warn" id="source-pill">Detecting…</span>
           </div>
-          <div class="subtle muted" id="arc-detail">Looking for Arc data on disk.</div>
-          <div id="arc-running-row" style="display:none;">
-            <button class="btn btn-soft btn-pill" id="arc-quit-btn">Quit Arc</button>
+          <div class="subtle muted" id="source-detail">Looking for browser data on disk.</div>
+          <div id="source-running-row" style="display:none;">
+            <button class="btn btn-soft btn-pill" id="source-quit-btn">Quit browser</button>
           </div>
         </div>
 
@@ -91,7 +105,7 @@
 
     <!-- ============================================ preview -->
     <section class="screen" id="screen-preview">
-      <p class="eyebrow">Step 2 of 3</p>
+      <p class="eyebrow">Step 3 of 4</p>
       <h1 class="h1" id="preview-title">Here's what we found.</h1>
       <p class="muted" style="margin-top: 4px;">Review and choose what to bring over.</p>
 
@@ -114,7 +128,7 @@
         <div>
           <p class="eyebrow" id="progress-meta">Working</p>
           <h1 class="display">Migrating</h1>
-          <p class="muted" id="progress-sub" style="margin-top: 4px;">Bringing your Arc setup into Zen.</p>
+          <p class="muted" id="progress-sub" style="margin-top: 4px;">Bringing your setup into Zen.</p>
         </div>
         <span class="elapsed" id="elapsed" aria-live="polite">0:00</span>
       </header>
@@ -138,7 +152,7 @@
         </svg>
       </div>
       <h1 class="display">All set.</h1>
-      <p class="summary" id="done-summary">Your Arc setup now lives in Zen.</p>
+      <p class="summary" id="done-summary">Your browser setup now lives in Zen.</p>
       <div class="actions">
         <button class="btn btn-primary" id="done-launch">Launch Zen</button>
         <button class="btn btn-ghost" id="done-quit">Quit</button>

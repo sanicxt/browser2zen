@@ -14,7 +14,7 @@ if (-not (Test-Path $svg)) {
 
 # Multi-resolution .ico (16/24/32/48/64/128/256). Windows picks the best
 # size at runtime depending on context (taskbar, alt-tab, file icon).
-$tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "arc2zen-iconset-$([guid]::NewGuid())")
+$tmp = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "browser2zen-iconset-$([guid]::NewGuid())")
 try {
     $sizes = 16, 24, 32, 48, 64, 128, 256
     $pngs = @()

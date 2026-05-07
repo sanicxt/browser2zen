@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """
-Arc → Zen Favicon Importer
+Chromium → Zen Favicon Importer
 
-Reads favicons from Arc's Chromium-format Favicons SQLite database and
-imports them into Zen's Firefox-format favicons.sqlite, linking each
-favicon to the page URLs that were migrated from Arc spaces.
+Reads favicons from any Chromium-format ``Favicons`` SQLite database
+(Arc / Chrome / Edge / Brave) and imports them into Zen's Firefox-format
+``favicons.sqlite``, linking each favicon to the migrated page URLs.
 
-Hash algorithms mirror Firefox's mozilla::HashString and places::HashURL
-so Zen finds the inserted entries via its hash-indexed lookups.
+Also injects each tab's icon as an inline ``image`` data URI inside
+``zen-sessions.jsonlz4`` — modern Zen renders pinned-tab favicons from
+that field, not from the SQLite store.
+
+Hash algorithms mirror Firefox's ``mozilla::HashString`` and
+``places::HashURL`` so Zen finds the inserted entries via its
+hash-indexed lookups.
+
+The orchestrator hands in a list of source ``Favicons`` paths via
+``favicon_dbs=`` so the same code serves every Chromium browser.
 """
 
 from __future__ import annotations
@@ -87,18 +95,30 @@ def _detect_image_mime(blob: bytes) -> str:
 
 
 class FaviconImporter:
-    """Imports favicons from Arc's Chromium DB into Zen's favicons.sqlite."""
+    """Imports favicons from any Chromium-format Favicons DB into Zen's favicons.sqlite."""
 
     DEFAULT_EXPIRE_DAYS = 28
 
-    def __init__(self, zen_profile_path: Path, dry_run: bool = False):
+    def __init__(
+        self,
+        zen_profile_path: Path,
+        dry_run: bool = False,
+        favicon_dbs: Optional[list[Path]] = None,
+    ):
+        # ``favicon_dbs`` lets the multi-source orchestrator inject paths
+        # from any Chromium-format browser. None = original Arc-only lookup.
         self.zen_profile = Path(zen_profile_path)
         self.zen_favicons_db = self.zen_profile / "favicons.sqlite"
         self.dry_run = dry_run
+        self._injected_dbs: Optional[list[Path]] = (
+            [Path(p) for p in favicon_dbs] if favicon_dbs is not None else None
+        )
         self._tempdir: Optional[Path] = None
 
-    def find_arc_favicon_dbs(self) -> list[Path]:
-        """Locate every Arc profile's Favicons SQLite file."""
+    def _favicon_dbs(self) -> list[Path]:
+        """Locate every source-browser profile's Favicons SQLite file."""
+        if self._injected_dbs is not None:
+            return [p for p in self._injected_dbs if p.is_file()]
         candidates: list[Path] = []
         home = Path.home()
         macos = home / "Library" / "Application Support" / "Arc" / "User Data"
@@ -115,7 +135,7 @@ class FaviconImporter:
     def _snapshot_db(self, src: Path) -> Path:
         """Copy a SQLite db to a temp dir so we can read it without lock contention."""
         if self._tempdir is None:
-            self._tempdir = Path(tempfile.mkdtemp(prefix="arc2zen_favicons_"))
+            self._tempdir = Path(tempfile.mkdtemp(prefix="browser2zen_favicons_"))
         dest = self._tempdir / f"{src.parent.name}_{src.name}.db"
         shutil.copy2(src, dest)
         for suffix in ("-wal", "-shm", "-journal"):
@@ -148,7 +168,7 @@ class FaviconImporter:
             return None
         return f"{p.scheme}://{p.netloc}"
 
-    def _collect_arc_favicons(
+    def _collect_favicons(
         self, page_urls: set[str]
     ) -> dict[str, tuple[str, bytes, int]]:
         """For each requested page URL, return best (icon_url, image_data, width)."""
@@ -165,12 +185,12 @@ class FaviconImporter:
         # page_url -> (icon_url, image_bytes, width, score). score is the tie-breaker.
         best: dict[str, tuple[str, bytes, int, tuple]] = {}
 
-        for arc_db in self.find_arc_favicon_dbs():
-            logger.info(f"📖 Reading Arc favicons from {arc_db.parent.name}")
+        for db in self._favicon_dbs():
+            logger.info(f"📖 Reading favicons from {db.parent.name}")
             try:
-                snap = self._snapshot_db(arc_db)
+                snap = self._snapshot_db(db)
             except Exception as exc:
-                logger.warning(f"Could not snapshot {arc_db}: {exc}")
+                logger.warning(f"Could not snapshot {db}: {exc}")
                 continue
 
             conn = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
@@ -247,7 +267,7 @@ class FaviconImporter:
 
         Pinned tab favicons in modern Zen are rendered from the tab's inline `image`
         field (a `data:image/...;base64,...` URI), not from favicons.sqlite. This
-        looks up Arc favicons for each tab URL and writes them inline so icons
+        looks up cached favicons for each tab URL and writes them inline so icons
         appear immediately when Zen starts.
         """
         from zen_sessions_importer import read_mozlz4, write_mozlz4
@@ -261,18 +281,18 @@ class FaviconImporter:
             return result
 
         try:
-            arc_favicons = self._collect_arc_favicons(urls)
+            cached_favicons = self._collect_favicons(urls)
         finally:
             self._cleanup_temp()
-        result["matched"] = len(arc_favicons)
-        logger.info(f"🔍 Matched favicons for {len(arc_favicons)} of {len(urls)} URLs")
+        result["matched"] = len(cached_favicons)
+        logger.info(f"🔍 Matched favicons for {len(cached_favicons)} of {len(urls)} URLs")
 
-        if not arc_favicons:
+        if not cached_favicons:
             return result
 
         # Encode each match as a data URI once.
         url_to_data_uri: dict[str, str] = {}
-        for page_url, (_icon_url, image_data, _width) in arc_favicons.items():
+        for page_url, (_icon_url, image_data, _width) in cached_favicons.items():
             if not image_data:
                 continue
             mime = _detect_image_mime(image_data)
@@ -346,20 +366,20 @@ class FaviconImporter:
             return result
 
         try:
-            arc_favicons = self._collect_arc_favicons(urls)
+            cached_favicons = self._collect_favicons(urls)
         finally:
             self._cleanup_temp()
 
-        result["matched"] = len(arc_favicons)
+        result["matched"] = len(cached_favicons)
         logger.info(
-            f"🔍 Matched favicons for {len(arc_favicons)} of {len(urls)} requested URLs"
+            f"🔍 Matched favicons for {len(cached_favicons)} of {len(urls)} requested URLs"
         )
 
-        if not arc_favicons:
+        if not cached_favicons:
             return result
 
         if self.dry_run:
-            logger.info(f"🧪 DRY RUN: would import {len(arc_favicons)} favicons")
+            logger.info(f"🧪 DRY RUN: would import {len(cached_favicons)} favicons")
             result["dry_run"] = True
             return result
 
@@ -376,7 +396,7 @@ class FaviconImporter:
         try:
             cur = conn.cursor()
             cur.execute("BEGIN")
-            for page_url, (icon_url, image_data, width) in arc_favicons.items():
+            for page_url, (icon_url, image_data, width) in cached_favicons.items():
                 if not image_data:
                     result["skipped"] += 1
                     continue
@@ -448,7 +468,7 @@ class FaviconImporter:
 
 
 def _iter_pinned_urls(extracted: dict) -> Iterable[str]:
-    """Walk the structure produced by ArcPinnedTabExtractor.export_data()."""
+    """Walk the legacy export-dict shape.."""
     for space in extracted.get("spaces", []):
         for tab in space.get("pinned_tabs", []) or []:
             url = tab.get("url")
@@ -470,7 +490,7 @@ def _iter_pinned_urls(extracted: dict) -> Iterable[str]:
 
 
 def main() -> int:
-    """CLI: import Arc favicons for all pinned URLs in arc_pinned_tabs_export.json."""
+    """CLI: import favicons for all pinned URLs in arc_pinned_tabs_export.json."""
     import argparse
     import json
     import sys
@@ -478,7 +498,7 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    parser = argparse.ArgumentParser(description="Import Arc favicons into Zen")
+    parser = argparse.ArgumentParser(description="Import favicons into Zen")
     parser.add_argument("--zen-profile", help="Zen profile name (partial match)")
     parser.add_argument("--export-file", default="arc_pinned_tabs_export.json")
     parser.add_argument("--dry-run", action="store_true")
@@ -505,7 +525,7 @@ def main() -> int:
         urls = list(dict.fromkeys(_iter_pinned_urls(data)))
         logger.info(f"Found {len(urls)} unique URLs in {export_path.name}")
     else:
-        logger.info(f"No {export_path.name} found: extracting URLs from Arc")
+        logger.info(f"No {export_path.name} found: extracting URLs from Arc directly")
         from arc_pinned_tab_extractor import ArcPinnedTabExtractor
         extractor = ArcPinnedTabExtractor()
         spaces = extractor.extract_pinned_tabs()
@@ -513,7 +533,7 @@ def main() -> int:
             logger.error("No Arc data found. Is Arc installed?")
             return 1
         # Reuse the extractor's JSON exporter to get a stable dict shape.
-        tmp = export_path.parent / f".arc2zen_favicon_tmp_{int(time.time())}.json"
+        tmp = export_path.parent / f".browser2zen_favicon_tmp_{int(time.time())}.json"
         try:
             extractor.export_to_json(spaces, tmp)
             with tmp.open() as fh:

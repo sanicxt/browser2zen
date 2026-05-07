@@ -459,12 +459,12 @@ class ZenSessionsImporter:
 
     # --- Public API ---
 
-    def import_arc_data(self, arc_export_data: dict, container_mappings: dict,
+    def import_data(self, export_data: dict, container_mappings: dict,
                         dry_run: bool = False) -> bool:
         """Import Arc spaces, pinned tabs, and folders into zen-sessions.jsonlz4.
 
         Args:
-            arc_export_data: Parsed Arc export JSON with 'spaces' array.
+            export_data: Parsed Arc export JSON with 'spaces' array.
             container_mappings: Dict mapping space_name -> container userContextId.
             dry_run: If True, log what would happen without writing.
 
@@ -478,7 +478,7 @@ class ZenSessionsImporter:
             all_new_tabs = []
             all_new_folders = []
 
-            for space_data in arc_export_data.get("spaces", []):
+            for space_data in export_data.get("spaces", []):
                 space_name = space_data["space_name"]
                 container_id = int(container_mappings.get(space_name, 0) or 0)
 

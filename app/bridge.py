@@ -56,6 +56,61 @@ class Bridge:
         self._final_state: dict = {"status": "idle"}  # 'idle' | 'running' | 'done' | 'error'
         self._lock = threading.Lock()
 
+    # ---------- source-browser picker --------------------------------
+
+    def list_sources(self) -> list:
+        """Return the catalogue of supported source browsers, with each
+        marked installed/running so the picker can dim entries the user
+        can't migrate from."""
+        # Local import keeps the source registry out of the bridge's
+        # cold-start path; we don't need it until the user opens the
+        # source picker.
+        from extractors import EXTRACTORS  # type: ignore[import-not-found]
+        out: list[dict] = []
+        for cls in EXTRACTORS:
+            inst = cls()
+            try:
+                installed = inst.is_installed()
+            except Exception:
+                installed = False
+            try:
+                running = inst.is_running() if installed else False
+            except Exception:
+                running = False
+            out.append({
+                "name": cls.name,
+                "displayName": cls.display_name,
+                "installed": installed,
+                "running": running,
+            })
+        return out
+
+    def set_source(self, name: str) -> dict:
+        """Switch the orchestrator's current source browser. Returns the
+        same shape as one entry of :meth:`list_sources` so the frontend
+        can confirm the switch landed."""
+        from extractors import by_name  # type: ignore[import-not-found]
+        try:
+            cls = by_name(name)
+        except KeyError:
+            return {"ok": False, "error": f"unknown source: {name!r}"}
+        inst = cls()
+        self.orchestrator = MigrationOrchestrator(source=inst)
+        # Reset run state — the new source means a fresh detect/preview.
+        with self._lock:
+            self._final_state = {"status": "idle"}
+        return {
+            "ok": True,
+            "name": cls.name,
+            "displayName": cls.display_name,
+            "installed": inst.is_installed(),
+            "running": inst.is_running(),
+        }
+
+    def current_source(self) -> dict:
+        src = self.orchestrator.source
+        return {"name": src.name, "displayName": src.display_name}
+
     # ----------------------------- window helpers -----------------------------
 
     def quit_app(self) -> None:
@@ -204,9 +259,34 @@ class Bridge:
             return {"error": str(exc), "trace": traceback.format_exc()}
 
     def quit_browser(self, name: str) -> dict:
-        if name not in ("arc", "zen"):
-            return {"ok": False, "error": "unknown browser"}
-        return _safe(quit_browser(name))  # type: ignore[arg-type]
+        # ``arc`` and ``zen`` keep going through the legacy graceful-quit
+        # helper (it ships AppleScript / taskkill maps for both). Anything
+        # else is delegated to the source extractor's ``quit()``, which
+        # knows the right process name for that browser.
+        if name == "zen":
+            return _safe(quit_browser("zen"))
+        if name == "arc":
+            return _safe(quit_browser("arc"))
+        # Source-browser path: the JS sends the source name directly
+        # (``chrome``, ``edge``, ``brave``, ``firefox``, ``safari``).
+        try:
+            from extractors import by_name  # type: ignore[import-not-found]
+            inst = by_name(name)()
+            return _safe(inst.quit())
+        except KeyError:
+            return {"ok": False, "error": f"unknown browser: {name!r}"}
+        except Exception as exc:
+            logger.exception("quit_browser %s failed", name)
+            return {"ok": False, "error": str(exc)}
+
+    def quit_source(self) -> dict:
+        """Quit whatever source browser is currently selected. Lets the
+        frontend skip the name dispatch entirely."""
+        try:
+            return _safe(self.orchestrator.source.quit())
+        except Exception as exc:
+            logger.exception("quit_source failed")
+            return {"ok": False, "error": str(exc)}
 
     def launch_zen(self) -> bool:
         return launch_zen()
@@ -253,7 +333,7 @@ class Bridge:
                         "trace": traceback.format_exc(),
                     }
 
-        self._worker = threading.Thread(target=_run, daemon=True, name="arc2zen-migrate")
+        self._worker = threading.Thread(target=_run, daemon=True, name="browser2zen-migrate")
         self._worker.start()
         return {"ok": True}
 
@@ -277,7 +357,7 @@ class Bridge:
         zen_profile = Path(data["zenProfilePath"]).expanduser()
         return MigrationOptions(
             zen_profile_path=zen_profile,
-            arc_space_filter=data.get("arcSpaceFilter") or None,
+            space_filter=data.get("spaceFilter") or None,
             folders_collapsed=bool(data.get("foldersCollapsed", True)),
             include_workspaces=bool(data.get("includeWorkspaces", True)),
             include_pinned_tabs=bool(data.get("includePinnedTabs", True)),

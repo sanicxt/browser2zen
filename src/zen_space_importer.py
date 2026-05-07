@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from zen_pinned_tab_importer import ZenPinnedTabImporter
 
 logger = logging.getLogger(__name__)
 
@@ -202,10 +201,10 @@ class ZenSpaceImporter:
             logger.error(f"Failed to update prefs: {e}")
             return False
 
-    def import_arc_spaces_as_containers(self, arc_export_data: Dict, dry_run: bool = False) -> Dict[str, int]:
+    def import_spaces_as_containers(self, export_data: Dict, dry_run: bool = False) -> Dict[str, int]:
         """Import Arc spaces as Zen containers."""
         try:
-            arc_spaces = arc_export_data.get('spaces', [])
+            arc_spaces = export_data.get('spaces', [])
             if not arc_spaces:
                 logger.warning("No Arc spaces found in export data")
                 return False
@@ -321,14 +320,14 @@ def main():
 
         # Load Arc export data
         with open(args.arc_export_file, 'r') as f:
-            arc_export_data = json.load(f)
+            export_data = json.load(f)
 
         # Create importer
         zen_profile = ZenProfile("Default", zen_profile_path)
         importer = ZenSpaceImporter(zen_profile)
 
         # Import spaces
-        success = importer.import_arc_spaces_as_containers(arc_export_data, args.dry_run)
+        success = importer.import_spaces_as_containers(export_data, args.dry_run)
 
         if success:
             print("✅ Arc to Zen migration completed successfully!")

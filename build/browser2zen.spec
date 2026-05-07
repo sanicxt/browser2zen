@@ -1,9 +1,9 @@
-# PyInstaller spec for the Arc2Zen GUI app — macOS and Windows.
+# PyInstaller spec for the browser2zen GUI app — macOS and Windows.
 #
 # Run from the repo root:
-#   pyinstaller build/arc2zen.spec
+#   pyinstaller build/browser2zen.spec
 #
-# Produces dist/Arc2Zen.app (macOS arm64) or dist/Arc2Zen/ (Windows x64).
+# Produces dist/browser2zen.app (macOS arm64) or dist/browser2zen/ (Windows x64).
 # The platform-specific build scripts (build/make_app.sh, build/make_exe.ps1)
 # wrap this and produce the final distributable artifact.
 
@@ -16,14 +16,15 @@ REPO_ROOT = Path.cwd().resolve()
 SRC_DIR = REPO_ROOT / "src"
 APP_DIR = REPO_ROOT / "app"
 
-# Single source of truth for the version string. Read app/__version__.py
-# at spec evaluation time so the bundled Info.plist (macOS) / file version
-# block (Windows) and the runtime ``bridge.version()`` always agree.
-_version_globals: dict = {}
-exec(compile((APP_DIR / "__version__.py").read_text(encoding="utf-8"),
-             str(APP_DIR / "__version__.py"), "exec"),
-     _version_globals)
-VERSION = _version_globals["VERSION"]
+# Single source of truth for the version string. Parse app/__version__.py
+# so the bundled Info.plist (macOS) / file version block (Windows) and the
+# runtime ``bridge.version()`` always agree.
+import re as _re
+_v_text = (APP_DIR / "__version__.py").read_text(encoding="utf-8")
+_v_match = _re.search(r'^VERSION\s*=\s*["\']([^"\']+)["\']', _v_text, _re.MULTILINE)
+if _v_match is None:
+    raise RuntimeError(f"VERSION not found in {APP_DIR / '__version__.py'}")
+VERSION = _v_match.group(1)
 
 IS_MAC = sys.platform == "darwin"
 IS_WIN = sys.platform == "win32"
@@ -82,11 +83,18 @@ a = Analysis(
         "zen_sessions_importer",
         "zen_bookmark_importer",
         "zen_favicon_importer",
-        "zen_pinned_tab_importer",
-        "zen_workspace_importer",
         "zen_sessionstore_manager",
-        "arc_history_importer",
-        "arc_cookies_importer",
+        "chromium_history_importer",
+        "chromium_cookies_importer",
+        "extractors",
+        "extractors.arc",
+        "extractors.base",
+        "extractors.brave",
+        "extractors.chrome",
+        "extractors.chromium",
+        "extractors.edge",
+        "extractors.firefox",
+        "extractors.safari",
     ],
     hookspath=[],
     hooksconfig={},
@@ -100,12 +108,12 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
+EXE_OBJ = EXE(
     pyz,
     a.scripts,
     [],
     exclude_binaries=True,
-    name="Arc2Zen",
+    name="browser2zen",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -119,13 +127,13 @@ exe = EXE(
 )
 
 coll = COLLECT(
-    exe,
+    EXE_OBJ,
     a.binaries,
     a.zipfiles,
     a.datas,
     strip=False,
     upx=False,
-    name="Arc2Zen",
+    name="browser2zen",
 )
 
 # BUNDLE() produces a .app on macOS only. On Windows the COLLECT() output
@@ -133,13 +141,13 @@ coll = COLLECT(
 if IS_MAC:
     app = BUNDLE(
         coll,
-        name="Arc2Zen.app",
+        name="browser2zen.app",
         icon=PLATFORM_ICON,
-        bundle_identifier="com.arc2zen.app",
+        bundle_identifier="com.browser2zen.app",
         version=VERSION,
         info_plist={
-            "CFBundleName": "Arc2Zen",
-            "CFBundleDisplayName": "Arc2Zen",
+            "CFBundleName": "browser2zen",
+            "CFBundleDisplayName": "browser2zen",
             "CFBundleVersion": VERSION,
             "CFBundleShortVersionString": VERSION,
             "NSHighResolutionCapable": True,
@@ -148,6 +156,6 @@ if IS_MAC:
             "LSMinimumSystemVersion": "12.0",
             "NSSupportsAutomaticTermination": True,
             "NSDesktopFolderUsageDescription":
-                "Arc2Zen reads Arc cookies from your library to migrate login state.",
+                "browser2zen reads source-browser cookies from your library to migrate login state.",
         },
     )

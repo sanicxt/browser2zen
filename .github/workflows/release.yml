@@ -69,14 +69,14 @@ jobs:
         # process exits before our timer fires and the build fails.
         run: |
           set -e
-          dist/Arc2Zen.app/Contents/MacOS/Arc2Zen &
+          dist/browser2zen.app/Contents/MacOS/browser2zen &
           PID=$!
           sleep 5
           if ! kill -0 $PID 2>/dev/null; then
             echo "::error::macOS bundle exited prematurely on launch"
             exit 1
           fi
-          osascript -e 'tell application "Arc2Zen" to quit' || kill $PID
+          osascript -e 'tell application "browser2zen" to quit' || kill $PID
           wait $PID 2>/dev/null || true
 
       - name: Build .dmg
@@ -88,7 +88,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg
-          path: dist/Arc2Zen-*.dmg
+          path: dist/browser2zen-*.dmg
           if-no-files-found: error
 
   build-windows:
@@ -124,7 +124,7 @@ jobs:
         # then stop it. Catches missing PyInstaller hidden imports
         # (clr_loader, pythonnet) that crash on first window create.
         run: |
-          $proc = Start-Process -FilePath "dist/Arc2Zen/Arc2Zen.exe" -PassThru
+          $proc = Start-Process -FilePath "dist/browser2zen/browser2zen.exe" -PassThru
           Start-Sleep -Seconds 5
           if ($proc.HasExited) {
             Write-Error "Windows bundle exited prematurely (exit code $($proc.ExitCode))"
@@ -143,7 +143,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-zip
-          path: dist/Arc2Zen-*.zip
+          path: dist/browser2zen-*.zip
           if-no-files-found: error
 
   release:
@@ -175,37 +175,37 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: Arc2Zen ${{ needs.resolve-version.outputs.version }}
+          name: browser2zen ${{ needs.resolve-version.outputs.version }}
           body: |
-            Arc2Zen ${{ needs.resolve-version.outputs.version }}
+            browser2zen ${{ needs.resolve-version.outputs.version }}
 
-            **macOS (Apple Silicon):** download `Arc2Zen-*-arm64.dmg`.
-            **Windows (x64):** download `Arc2Zen-*-win-x64.zip`.
+            **macOS (Apple Silicon):** download `browser2zen-*-arm64.dmg`.
+            **Windows (x64):** download `browser2zen-*-win-x64.zip`.
 
             ## First launch (one-time setup)
 
-            macOS will block the app the first time because Arc2Zen isn't
+            macOS will block the app the first time because browser2zen isn't
             notarized. To allow it:
 
-            1. Double-click `Arc2Zen.app` — macOS shows a "damaged" or
+            1. Double-click `browser2zen.app` — macOS shows a "damaged" or
                "cannot verify" dialog. Click **Done**.
             2. Open **System Settings → Privacy & Security**.
             3. Scroll down and click **Open Anyway** next to the message
-               about Arc2Zen.
+               about browser2zen.
             4. Enter your Mac password if prompted.
             5. Click **Open Anyway** in the final confirmation dialog.
 
             On Windows: right-click the downloaded `.zip` → **Properties**
             → **Unblock** → OK before extracting (this strips the
             Mark-of-the-Web from every file inside in one shot). After
-            extracting, double-click `Arc2Zen.exe`. SmartScreen may show
+            extracting, double-click `browser2zen.exe`. SmartScreen may show
             "Windows protected your PC" — click **More info** → **Run
             anyway**.
 
             Full instructions are also bundled inside each artifact as
             `INSTRUCTIONS.txt`.
           files: |
-            artifacts/Arc2Zen-*.dmg
-            artifacts/Arc2Zen-*.zip
+            artifacts/browser2zen-*.dmg
+            artifacts/browser2zen-*.zip
             artifacts/INSTRUCTIONS.txt
           fail_on_unmatched_files: true

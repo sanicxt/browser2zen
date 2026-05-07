@@ -1,5 +1,5 @@
 /* ====================================================================
-   Arc2Zen GUI: single-window, multi-screen.
+   browser2zen GUI: single-window, multi-screen.
    Layout: 760×580, frameless, vibrancy on macOS.
    ==================================================================== */
 
@@ -259,6 +259,11 @@ body[data-platform="mac"] main {
   font-size: 22px;
   font-weight: 300;
 }
+.brand-source-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 .brand-mark {
   display: inline-grid;
   place-items: center;
@@ -266,35 +271,129 @@ body[data-platform="mac"] main {
   border-radius: 14px;
   position: relative;
   flex: 0 0 auto;
-}
-.brand-mark.small { width: 28px; height: 28px; border-radius: 8px; }
-.brand-mark.tiny  { width: 20px; height: 20px; border-radius: 6px; }
-.brand-mark svg { width: 70%; height: 70%; }
-.brand-mark.arc {
-  /* Soft cream/off-white badge so the multicolor A reads cleanly.
-     Subtle warm gradient hints at Arc's pink without competing with the mark. */
-  background: linear-gradient(160deg, #FFF7F2 0%, #FFE9F0 60%, #FFD8E5 100%);
+  background: #FFFFFF;
   box-shadow:
-    0 4px 14px rgba(214, 60, 110, 0.22),
+    0 4px 14px rgba(0, 0, 0, 0.18),
     inset 0 0 0 1px rgba(255, 255, 255, 0.6);
 }
-.brand-mark.arc svg {
-  /* SVG strokes carry their own colors; no filter needed. */
+.brand-mark.small { width: 32px; height: 32px; border-radius: 9px; }
+.brand-mark.tiny  { width: 22px; height: 22px; border-radius: 6px; }
+.brand-mark img {
+  width: 70%; height: 70%;
+  display: block;
+  pointer-events: none;
+  -webkit-user-select: none; user-select: none;
 }
+.brand-mark.tiny img, .brand-mark.small img { width: 78%; height: 78%; }
+
+/* Per-brand badge tints. Each colour pulls from the browser's
+   primary brand identity — kept gentle so the icon stays the focus. */
+.brand-mark.arc     { background: linear-gradient(160deg, #FFF7F2 0%, #FFE9F0 60%, #FFD8E5 100%);
+                      box-shadow: 0 4px 14px rgba(214, 60, 110, 0.22), inset 0 0 0 1px rgba(255,255,255,0.6); }
+.brand-mark.chrome  { background: linear-gradient(160deg, #FFFFFF 0%, #F4F8FB 100%);
+                      box-shadow: 0 4px 14px rgba(66, 133, 244, 0.22), inset 0 0 0 1px rgba(255,255,255,0.6); }
+.brand-mark.edge    { background: linear-gradient(160deg, #E5F6FB 0%, #CDE9F2 100%);
+                      box-shadow: 0 4px 14px rgba(0, 120, 215, 0.22), inset 0 0 0 1px rgba(255,255,255,0.6); }
+.brand-mark.brave   { background: linear-gradient(160deg, #FFF1E8 0%, #FFD8C0 100%);
+                      box-shadow: 0 4px 14px rgba(251, 84, 43, 0.22), inset 0 0 0 1px rgba(255,255,255,0.6); }
+.brand-mark.firefox { background: linear-gradient(160deg, #FFF6E8 0%, #FFE2C8 100%);
+                      box-shadow: 0 4px 14px rgba(255, 113, 57, 0.22), inset 0 0 0 1px rgba(255,255,255,0.6); }
+.brand-mark.safari  { background: linear-gradient(160deg, #E9F4FF 0%, #CFE3FF 100%);
+                      box-shadow: 0 4px 14px rgba(0, 108, 255, 0.22), inset 0 0 0 1px rgba(255,255,255,0.6); }
 .brand-mark.zen {
   background: linear-gradient(160deg, #2B2B2F 0%, #15151A 70%, #0B0B0E 100%);
   box-shadow:
     0 6px 18px rgba(0,0,0,0.45),
     inset 0 0 0 1px rgba(255,255,255,0.10);
-  color: #F2F2F4;          /* white-ish concentric rings */
 }
-.brand-mark.tiny.arc, .brand-mark.tiny.zen { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); }
+.brand-mark.tiny { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.12); }
+
+/* Easter egg: five clicks on the welcome Zen logo trigger a merge
+   animation. Each source badge slides into Zen one after another with
+   a 60ms stagger, then snaps back. Visualises what the app actually
+   does — small reward for users who fidget. */
+.brand-source-row > .brand-mark {
+  transition: transform 800ms cubic-bezier(0.55, 0, 0.2, 1),
+              opacity   600ms ease;
+  will-change: transform, opacity;
+}
+.brand-source-row.is-merging > .brand-mark {
+  transform: translateX(140px) scale(0.45);
+  opacity: 0;
+  pointer-events: none;
+}
+.brand-source-row.is-merging > .brand-mark:nth-child(2) { transition-delay: 60ms; }
+.brand-source-row.is-merging > .brand-mark:nth-child(3) { transition-delay: 120ms; }
+.brand-source-row.is-merging > .brand-mark:nth-child(4) { transition-delay: 180ms; }
+.brand-source-row.is-merging > .brand-mark:nth-child(5) { transition-delay: 240ms; }
+.brand-source-row.is-merging > .brand-mark:nth-child(6) { transition-delay: 300ms; }
+
+@keyframes zen-merge-pulse {
+  0%   { transform: scale(1);    box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.10); }
+  60%  { transform: scale(1.22); box-shadow: 0 0 36px rgba(180, 200, 255, 0.65), inset 0 0 0 1px rgba(255,255,255,0.28); }
+  100% { transform: scale(1);    box-shadow: 0 6px 18px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.10); }
+}
+.brand-mark.zen.is-merging {
+  animation: zen-merge-pulse 1100ms ease-in-out;
+}
 
 .card-head {
   display: flex; align-items: center; gap: var(--space-3);
 }
 .card-head .h2 { flex: 1; }
-.card-head .brand-mark { width: 28px; height: 28px; border-radius: 8px; }
+.card-head .brand-mark { width: 32px; height: 32px; border-radius: 9px; }
+
+/* ---------------------- screen: source picker ---------------------- */
+
+.source-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+  margin-top: var(--space-5);
+}
+.source-card {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 72px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elev);
+  border: 1px solid var(--bd-soft);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--dur-medium) var(--ease-standard),
+              background-color var(--dur-medium) var(--ease-standard),
+              transform var(--dur-fast) var(--ease-standard);
+}
+.source-card:hover:not(:disabled) { border-color: var(--bd-medium); transform: translateY(-1px); }
+.source-card:disabled { opacity: 0.45; cursor: not-allowed; }
+.source-card:disabled .brand-mark { filter: grayscale(0.85); opacity: 0.7; }
+.source-card[data-selected="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft, var(--bg-elev-hi));
+}
+.source-card .brand-mark { width: 36px; height: 36px; border-radius: 10px; }
+.source-card-text {
+  display: flex; flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.source-card-name {
+  font-size: var(--fs-body);
+  font-weight: var(--fw-medium);
+}
+.source-card-status {
+  font-size: var(--fs-tiny);
+  color: var(--text-muted);
+}
+.source-card-status.is-ok   { color: var(--success); }
+.source-card-status.is-warn { color: var(--warn); }
+.source-card-status.is-dim  { color: var(--text-muted); opacity: 0.7; }
 
 /* ---------------------- screen: detect ---------------------- */
 

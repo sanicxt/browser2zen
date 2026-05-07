@@ -1,13 +1,14 @@
 """
-MigrationOrchestrator: the GUI's facade over the existing importer modules.
+MigrationOrchestrator — the single migration entry point.
 
-We import the existing classes from ``src/`` unchanged. The only thing the
-GUI adds on top is structured progress events, an isolation-safe install of
-the ProgressBus around each step, and a couple of cross-cutting concerns
-(detecting previous migrations, computing per-space counts for Preview).
+The GUI wraps this via :class:`app.bridge.Bridge`; any headless caller
+can import it directly. The orchestrator drives a fixed pipeline of
+independent importers from ``src/``, layered with structured progress
+events through :class:`ProgressBus`, plus cross-cutting concerns
+(previous-migration detection, per-space preview counts).
 
-The CLI tool (``migrate_arc_to_zen.py``) keeps working: it does not import
-this module. There are intentionally no changes to ``src/`` here.
+Source-browser dispatch happens via a :class:`BrowserExtractor` instance
+passed at construction; everything past ``extract`` is source-agnostic.
 """
 
 from __future__ import annotations
@@ -15,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import tempfile
 import time
 import traceback
 from dataclasses import dataclass, field
@@ -29,13 +29,15 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 # Existing importer modules (unchanged).
-from arc_pinned_tab_extractor import ArcPinnedTabExtractor               # noqa: E402
 from zen_space_importer import ZenSpaceImporter, ZenProfile as _SrcZenProfile  # noqa: E402
 from zen_sessions_importer import ZenSessionsImporter                    # noqa: E402
 from zen_bookmark_importer import ZenBookmarkImporter                    # noqa: E402
 from zen_favicon_importer import FaviconImporter, _iter_pinned_urls      # noqa: E402
-from arc_history_importer import HistoryImporter                          # noqa: E402
-from arc_cookies_importer import CookiesImporter, _discover_user_containers  # noqa: E402
+from chromium_history_importer import HistoryImporter                          # noqa: E402
+from chromium_cookies_importer import CookiesImporter, _discover_user_containers  # noqa: E402
+
+# Source-browser adapters.
+from extractors import ArcExtractor, BrowserExtractor                    # noqa: E402
 
 from .env_check import EnvReport, ZenProfile, check_environment
 from .progress_bus import ProgressBus, ProgressEvent
@@ -74,7 +76,7 @@ class PreviewReport:
 @dataclass
 class MigrationOptions:
     zen_profile_path: Path
-    arc_space_filter: Optional[str] = None
+    space_filter: Optional[str] = None    # name kept for backwards compat; matches against any source's spaces
     folders_collapsed: bool = True
     include_workspaces: bool = True
     include_pinned_tabs: bool = True
@@ -98,8 +100,10 @@ GUI_STEPS = (
     "finalize",
 )
 
+# ``extract`` is templated by the source-browser display name; everything
+# else is source-agnostic.
 STEP_LABELS = {
-    "extract":    "Reading Arc data",
+    "extract":    "Reading {source} data",
     "containers": "Creating containers",
     "sessions":   "Importing spaces, pinned tabs, open tabs and folders",
     "bookmarks":  "Backing up as bookmarks",
@@ -110,28 +114,33 @@ STEP_LABELS = {
 }
 
 
+def _step_label(step: str, source_display: str) -> str:
+    return STEP_LABELS.get(step, step).format(source=source_display)
+
+
 # ------------------------------------------------------------------ orchestrator
 
 class MigrationOrchestrator:
-    def __init__(self) -> None:
+    def __init__(self, source: Optional[BrowserExtractor] = None) -> None:
         self.bus = ProgressBus()
+        # Default source = Arc so existing callers (CLI/Arc-only frontend)
+        # don't need to change.
+        self.source: BrowserExtractor = source or ArcExtractor()
 
     # ---- env / preview --------------------------------------------------
 
     def check_environment(self) -> EnvReport:
-        return check_environment()
+        return check_environment(self.source)
 
     def preview(self, opts: MigrationOptions) -> PreviewReport:
         # Read-only: no bus, no temp files left behind.
-        extractor = ArcPinnedTabExtractor()
-        spaces = extractor.extract_pinned_tabs() or []
+        data = self.source.extract()
+        spaces = data.spaces
 
-        if opts.arc_space_filter:
-            needle = opts.arc_space_filter.lower()
+        if opts.space_filter:
+            needle = opts.space_filter.lower()
             spaces = [s for s in spaces if needle in s.space_name.lower()]
 
-        # ``ArcSpace.pinned_tabs`` is the flat list (folder membership is
-        # tracked via ``ArcFolder.children_ids``, not nested children).
         space_summaries: list[SpaceSummary] = []
         pinned_total = open_total = folder_total = bookmark_total = 0
         all_urls: list[str] = []
@@ -139,7 +148,7 @@ class MigrationOrchestrator:
         for s in spaces:
             pinned_count = len(s.pinned_tabs or [])
             open_count = len(s.open_tabs or [])
-            essential = sum(1 for t in (s.pinned_tabs or []) if getattr(t, "is_essential", False))
+            essential = sum(1 for t in (s.pinned_tabs or []) if t.is_essential)
             folder_count = len(s.folders or [])
             color_rgb: Optional[Tuple[int, int, int]] = None
             if s.color and all(k in s.color for k in ("r", "g", "b")):
@@ -185,17 +194,12 @@ class MigrationOrchestrator:
             cookies_estimate=cookies_estimate,
         )
 
-    @staticmethod
-    def _estimate_favicons(urls: list[str]) -> int:
-        # Cheapest accurate estimate: count Arc URLs that have a cached icon.
+    def _estimate_favicons(self, urls: list[str]) -> int:
+        # Cheapest accurate estimate: count source URLs that have a cached icon.
         try:
-            home = Path.home()
-            arc_root = home / "Library/Application Support/Arc/User Data"
-            if not arc_root.is_dir():
-                return 0
             import sqlite3
             unique = set()
-            for db in arc_root.glob("*/Favicons"):
+            for db in self.source.favicon_db_paths():
                 try:
                     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
                     cur = conn.execute("SELECT DISTINCT page_url FROM icon_mapping")
@@ -208,17 +212,16 @@ class MigrationOrchestrator:
         except Exception:
             return 0
 
-    @staticmethod
-    def _estimate_history_rows() -> int:
+    def _estimate_history_rows(self) -> int:
         try:
             import sqlite3
-            home = Path.home()
-            root = home / "Library/Application Support/Arc/User Data"
             total = 0
-            for db in root.glob("*/History"):
+            for db in self.source.history_db_paths():
                 try:
                     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
-                    n = conn.execute("SELECT COUNT(*) FROM urls WHERE url LIKE 'http%' OR url LIKE 'ftp%'").fetchone()[0]
+                    n = conn.execute(
+                        "SELECT COUNT(*) FROM urls WHERE url LIKE 'http%' OR url LIKE 'ftp%'"
+                    ).fetchone()[0]
                     conn.close()
                     total += int(n or 0)
                 except Exception:
@@ -227,14 +230,11 @@ class MigrationOrchestrator:
         except Exception:
             return 0
 
-    @staticmethod
-    def _estimate_cookies() -> int:
+    def _estimate_cookies(self) -> int:
         try:
             import sqlite3
-            home = Path.home()
-            root = home / "Library/Application Support/Arc/User Data"
             total = 0
-            for db in root.glob("*/Cookies"):
+            for db in self.source.cookie_db_paths():
                 try:
                     conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
                     n = conn.execute("SELECT COUNT(*) FROM cookies").fetchone()[0]
@@ -266,12 +266,13 @@ class MigrationOrchestrator:
     def _start_step(self, step: str) -> None:
         self.bus.set_step(step)
         self._emit({"kind": "step_start", "step": step,
-                    "message": STEP_LABELS.get(step, step)})
+                    "message": _step_label(step, self.source.display_name)})
 
     def _done_step(self, step: str, summary: Optional[dict] = None,
                    message: Optional[str] = None) -> None:
         ev: ProgressEvent = {"kind": "step_done", "step": step,
-                             "message": message or f"{STEP_LABELS.get(step, step)} done"}
+                             "message": message or
+                                        f"{_step_label(step, self.source.display_name)} done"}
         if summary is not None:
             ev["summary"] = summary
         self._emit(ev)
@@ -280,7 +281,7 @@ class MigrationOrchestrator:
         self._emit({
             "kind": "step_error",
             "step": step,
-            "message": f"{STEP_LABELS.get(step, step)} failed",
+            "message": f"{_step_label(step, self.source.display_name)} failed",
             "detail": "".join(traceback.format_exception_only(type(exc), exc)).strip(),
         })
 
@@ -289,39 +290,33 @@ class MigrationOrchestrator:
 
         # 1: extract -----------------------------------------------------
         self._start_step("extract")
-        extractor = ArcPinnedTabExtractor()
-        spaces = extractor.extract_pinned_tabs()
-        if not spaces:
-            self._error_step("extract", RuntimeError("No Arc data found."))
+        try:
+            export = self.source.extract()
+        except Exception as exc:
+            self._error_step("extract", exc)
             yield from self._drain_yield()
             return
-        if opts.arc_space_filter:
-            needle = opts.arc_space_filter.lower()
-            spaces = [s for s in spaces if needle in s.space_name.lower()]
-            if not spaces:
-                self._error_step("extract", RuntimeError(f"No Arc space matches '{opts.arc_space_filter}'."))
+        if opts.space_filter:
+            needle = opts.space_filter.lower()
+            export.spaces = [s for s in export.spaces if needle in s.space_name.lower()]
+            if not export.spaces:
+                self._error_step("extract", RuntimeError(
+                    f"No {self.source.display_name} space matches '{opts.space_filter}'."
+                ))
                 yield from self._drain_yield()
                 return
 
-        # Materialize the JSON shape the existing importers expect.
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8") as tf:
-            export_path = Path(tf.name)
-        try:
-            extractor.export_to_json(spaces, export_path)
-            with export_path.open(encoding="utf-8") as fh:
-                arc_export_data = json.load(fh)
-        finally:
-            try:
-                export_path.unlink()
-            except OSError:
-                pass
+        # Materialise the dict shape the Zen-side writers consume. Every
+        # extractor lowers to this single shape; the writers stay
+        # source-agnostic.
+        export_data = export.to_legacy_dict()
 
-        space_count = len(arc_export_data.get("spaces", []))
-        pinned_count = sum(len(sp.get("pinned_tabs") or []) for sp in arc_export_data.get("spaces", []))
+        space_count = len(export_data.get("spaces", []))
+        pinned_count = sum(len(sp.get("pinned_tabs") or []) for sp in export_data.get("spaces", []))
         self._done_step("extract", summary={
             "spaces": space_count,
             "pinned": pinned_count,
-        }, message=f"Read {space_count} Arc spaces")
+        }, message=f"Read {space_count} {self.source.display_name} spaces")
         yield from self._drain_yield()
 
         # 2: containers --------------------------------------------------
@@ -331,8 +326,8 @@ class MigrationOrchestrator:
             try:
                 src_zen = _SrcZenProfile(name=zen_profile.name, path=zen_profile)
                 space_importer = ZenSpaceImporter(src_zen)
-                container_mappings = space_importer.import_arc_spaces_as_containers(
-                    arc_export_data, dry_run=False
+                container_mappings = space_importer.import_spaces_as_containers(
+                    export_data, dry_run=False
                 ) or {}
                 self._done_step("containers", summary={"created_or_reused": len(container_mappings)})
             except Exception as exc:
@@ -349,16 +344,16 @@ class MigrationOrchestrator:
                 # both from there, regardless of pinned/unpinned status.
                 # Filter them out of the data fed to the importer when the
                 # toggle is off so we don't have to plumb a flag through.
-                payload = arc_export_data
+                payload = export_data
                 if not opts.include_open_tabs:
-                    payload = dict(arc_export_data)
+                    payload = dict(export_data)
                     payload["spaces"] = [
                         {**sp, "open_tabs": []}
-                        for sp in arc_export_data.get("spaces", [])
+                        for sp in export_data.get("spaces", [])
                     ]
 
                 sess = ZenSessionsImporter(zen_profile, folders_collapsed=opts.folders_collapsed)
-                ok = sess.import_arc_data(payload, container_mappings, dry_run=False)
+                ok = sess.import_data(payload, container_mappings, dry_run=False)
                 pinned_total = sum(len(sp.get("pinned_tabs") or [])
                                    for sp in payload.get("spaces", []))
                 open_total = sum(len(sp.get("open_tabs") or [])
@@ -375,7 +370,7 @@ class MigrationOrchestrator:
             self._start_step("bookmarks")
             try:
                 bm = ZenBookmarkImporter(zen_profile)
-                ok = bm.import_arc_bookmarks(arc_export_data, dry_run=False)
+                ok = bm.import_bookmarks(export_data, dry_run=False)
                 self._done_step("bookmarks", summary={"ok": bool(ok)})
             except Exception as exc:
                 self._error_step("bookmarks", exc)
@@ -385,8 +380,11 @@ class MigrationOrchestrator:
         if opts.include_favicons:
             self._start_step("favicons")
             try:
-                fav = FaviconImporter(zen_profile, dry_run=False)
-                urls = list(dict.fromkeys(_iter_pinned_urls(arc_export_data)))
+                fav = FaviconImporter(
+                    zen_profile, dry_run=False,
+                    favicon_dbs=self.source.favicon_db_paths(),
+                )
+                urls = list(dict.fromkeys(_iter_pinned_urls(export_data)))
                 db_summary = fav.import_favicons(urls)
                 session_summary = fav.inject_session_images(urls)
                 self._done_step("favicons", summary={
@@ -407,7 +405,10 @@ class MigrationOrchestrator:
         if opts.include_history:
             self._start_step("history")
             try:
-                h = HistoryImporter(zen_profile, dry_run=False)
+                h = HistoryImporter(
+                    zen_profile, dry_run=False,
+                    history_dbs=self.source.history_db_paths(),
+                )
                 summary = h.import_history()
                 self._done_step("history", summary=summary)
             except Exception as exc:
@@ -419,7 +420,14 @@ class MigrationOrchestrator:
             self._start_step("cookies")
             try:
                 container_ids = _discover_user_containers(zen_profile)
-                c = CookiesImporter(zen_profile, dry_run=False, container_ids=container_ids)
+                c = CookiesImporter(
+                    zen_profile, dry_run=False,
+                    container_ids=container_ids,
+                    cookie_dbs=self.source.cookie_db_paths(),
+                    keychain_service=getattr(self.source, "keychain_service", "Arc Safe Storage"),
+                    keychain_account=getattr(self.source, "keychain_account", "Arc"),
+                    local_state_paths=self.source.local_state_paths(),
+                )
                 summary = c.import_cookies()
                 if summary.get("error"):
                     err = summary["error"]
@@ -427,11 +435,11 @@ class MigrationOrchestrator:
                         # macOS
                         "keychain_denied":           "macOS Keychain access was denied; cookies skipped.",
                         # Windows
-                        "arc_local_state_missing":   "Arc has not been launched on this Windows account yet; cookies skipped.",
-                        "arc_no_encrypted_key":      "Arc has no cookie encryption key on this account; cookies skipped.",
-                        "arc_appbound_encryption":   "Arc cookies use newer (v20) app-bound encryption; cookies skipped. Sign in fresh on imported sites.",
-                        "arc_unknown_key_prefix":    "Arc Local State key has an unrecognised prefix; cookies skipped.",
-                        "arc_unexpected_key_length": "Arc DPAPI key has unexpected length; cookies skipped.",
+                        "chromium_local_state_missing":   "Arc has not been launched on this Windows account yet; cookies skipped.",
+                        "chromium_no_encrypted_key":      "Arc has no cookie encryption key on this account; cookies skipped.",
+                        "chromium_appbound_encryption":   "Arc cookies use newer (v20) app-bound encryption; cookies skipped. Sign in fresh on imported sites.",
+                        "chromium_unknown_key_prefix":    "Arc Local State key has an unrecognised prefix; cookies skipped.",
+                        "chromium_unexpected_key_length": "Arc DPAPI key has unexpected length; cookies skipped.",
                         "dpapi_wrong_user":          "Cookies were encrypted on a different Windows account and can't be migrated. Sign in fresh on imported sites.",
                         "dpapi_failed":              "Windows DPAPI rejected the cookie key; cookies skipped.",
                         # Both
@@ -448,7 +456,7 @@ class MigrationOrchestrator:
         # 9: finalize ----------------------------------------------------
         self._start_step("finalize")
         try:
-            (zen_profile / ".arc2zen-migrated").write_text(
+            (zen_profile / ".browser2zen-migrated").write_text(
                 json.dumps({"ts": time.time(), "version": 1}), encoding="utf-8"
             )
         except Exception:

@@ -20,10 +20,10 @@ wheels/
 
 # PyInstaller / packaging output (the .app, .dmg, transient build cache).
 # Note: our `build/` directory at the repo root holds source build scripts
-# (spec, shell scripts) and is committed; the `build/arc2zen/` subdir that
-# PyInstaller generates is not.
+# (spec, shell scripts) and is committed; the `build/browser2zen/` subdir that
+# that PyInstaller generates is not.
 dist/
-/build/arc2zen/
+/build/browser2zen/
 /build/__pycache__/
 *.spec.bak
 

@@ -28,46 +28,46 @@ for your OS.
 
 ### macOS (Apple Silicon)
 
-1. Download `Arc2Zen-x.y.z-arm64.dmg`.
-2. Double-click the DMG to mount it, then double-click `Arc2Zen.app`.
+1. Download `browser2zen-x.y.z-arm64.dmg`.
+2. Double-click the DMG to mount it, then double-click `browser2zen.app`.
 3. macOS will show a dialog ("damaged" or "cannot verify"). Click
    **Done**. Do **not** click "Move to Trash".
 4. Open  → **System Settings** → **Privacy & Security**.
-5. Scroll the right pane until you see *"Arc2Zen was blocked to
+5. Scroll the right pane until you see *"browser2zen was blocked to
    protect your Mac."* Click **Open Anyway**.
 6. Enter your Mac password if prompted.
 7. macOS shows one final confirmation. Click **Open Anyway**.
 
 The app launches and walks you through detection, preview, and
 migration. Steps 3 to 7 only happen the first time. After that you can
-double-click `Arc2Zen.app` normally. When you're done, drag the DMG to
-the Trash; Arc2Zen runs from inside the DMG and doesn't install itself
+double-click `browser2zen.app` normally. When you're done, drag the DMG to
+the Trash; browser2zen runs from inside the DMG and doesn't install itself
 anywhere.
 
 ### Windows (x64)
 
-1. Download `Arc2Zen-x.y.z-win-x64.zip`.
+1. Download `browser2zen-x.y.z-win-x64.zip`.
 2. **Before extracting**, right-click the .zip in your Downloads
    folder and choose **Properties**. Tick the **Unblock** checkbox at
    the bottom and click OK. (This strips the Mark-of-the-Web tag from
    every file inside in one shot. If you skip this step, every .dll
    inside the bundle trips SmartScreen separately.)
-3. Double-click the .zip and drag the `Arc2Zen` folder anywhere.
-4. Open the `Arc2Zen` folder and double-click `Arc2Zen.exe`.
+3. Double-click the .zip and drag the `browser2zen` folder anywhere.
+4. Open the `browser2zen` folder and double-click `browser2zen.exe`.
 5. Windows will show *"Windows protected your PC"*. Click **More
    info**, then **Run anyway**.
 
-The app launches. When you're done, drag the `Arc2Zen` folder to the
+The app launches. When you're done, drag the `browser2zen` folder to the
 Recycle Bin; nothing else needs to be uninstalled.
 
 > **Why all the steps?** Apple and Microsoft each charge developers
-> for the certificates that remove these prompts. Arc2Zen is free
+> for the certificates that remove these prompts. browser2zen is free
 > open-source software and those fees aren't worth passing on. The
 > macOS bundle is ad-hoc codesigned, so you can verify its contents
 > have not been tampered with at any time:
 >
 > ```
-> codesign --verify --deep --strict /Volumes/Arc2Zen/Arc2Zen.app
+> codesign --verify --deep --strict /Volumes/browser2zen/browser2zen.app
 > ```
 >
 > Both platforms are reproducible from source: see [`build/`](./build).
@@ -76,7 +76,7 @@ Recycle Bin; nothing else needs to be uninstalled.
 
 If Zen Browser isn't installed yet, the detection screen offers a
 **Download Zen** button. Install Zen, launch it once so it creates
-your profile, then click **Recheck** in Arc2Zen and continue.
+your profile, then click **Recheck** in browser2zen and continue.
 
 ---
 
@@ -84,18 +84,18 @@ your profile, then click **Recheck** in Arc2Zen and continue.
 
 | | |
 | --- | --- |
-| **Spaces** | Each Arc space becomes a Zen workspace, with its emoji icon and colour theme. |
+| **Spaces** | Each source-browser space becomes a Zen workspace, with its emoji icon and colour theme. |
 | **Pinned tabs** | All pinned tabs land on the matching workspace, in their original order. |
 | **Folders** | The full nested folder hierarchy is preserved, collapsed by default to keep your sidebar clean. |
-| **Essential tabs** | Arc's top-toolbar Essentials become pinned tabs on the right space. |
+| **Essential tabs** | Arc's top-toolbar Essentials (Arc only) become pinned tabs on the right space. |
 | **Open tabs** | Optional. Live tabs become real Zen tabs. |
 | **Bookmarks** | Pinned tabs are also mirrored to Firefox bookmarks as a backup. |
-| **Favicons** | Arc's cached icons are inlined so tabs show their icons immediately, with no waiting for refetch. |
+| **Favicons** | The source's cached icons are inlined so tabs show their icons immediately, with no waiting for refetch. |
 | **History** | Optional. Browsing history with original timestamps is copied over. |
-| **Login state** | Optional. Arc cookies are decrypted (via macOS Keychain or Windows DPAPI, depending on platform) and re-encrypted into Zen so you stay logged in to Gmail, Twitter, and the rest. |
+| **Login state** | Optional. Chromium-format cookies are decrypted (via macOS Keychain or Windows DPAPI, depending on platform) and re-encrypted into Zen so you stay logged in to Gmail, Twitter, and the rest. |
 
 Every step writes a timestamped backup beside your Zen profile before
-it changes anything, and Arc data is read-only. The Backups screen
+it changes anything, and source-browser data is read-only. The Backups screen
 inside the app lets you restore or delete those backups any time.
 
 ---
@@ -105,49 +105,45 @@ inside the app lets you restore or delete those backups any time.
 For Linux, Intel Mac, contributors, or anyone who'd rather skip the DMG:
 
 ```bash
-git clone https://github.com/rafcabezas/arc2zen.git
-cd arc2zen
-pip install -r requirements.txt
-
-# CLI
-python3 migrate_arc_to_zen.py --dry-run    # preview only
-python3 migrate_arc_to_zen.py              # actual migration
-
-# GUI (macOS or Windows)
-pip install -r requirements-build.txt
-python -m app
+git clone https://github.com/tarikbc/browser2zen.git
+cd browser2zen
+pip install -r requirements.txt -r requirements-build.txt
+python -m app                # GUI (works on macOS and Windows)
+python -m app --debug        # GUI with WebKit DevTools open
 ```
 
-The CLI accepts `--zen-profile NAME`, `--arc-space NAME`,
-`--folders-open`, `--skip-favicons`, `--open-tabs`, `--verbose`, and
-`--dry-run`. Use `python3 migrate_arc_to_zen.py --help` for the full
-list.
-
-Individual importers can be run on their own. They are all idempotent
-and produce timestamped backups:
+Individual importers can be exercised on their own (each is idempotent
+and produces a timestamped backup before writing):
 
 ```bash
-python3 src/arc_history_importer.py --zen-profile "Default (release)"
-python3 src/arc_cookies_importer.py --zen-profile "Default (release)"
-python3 src/zen_favicon_importer.py --zen-profile "Default (release)"
+python3 src/chromium_history_importer.py --zen-profile "Default (release)"
+python3 src/chromium_cookies_importer.py --zen-profile "Default (release)"
+python3 src/zen_favicon_importer.py     --zen-profile "Default (release)"
 ```
+
+The orchestrator's pipeline is what the GUI runs end-to-end; see
+`app/orchestrator.py` if you want to drive a migration programmatically.
 
 ---
 
 ## How it works
 
 The migration runs as a fixed pipeline of independent importers, each
-of which reads Arc data through a snapshot copy of the source SQLite
-file (so Arc itself is never touched) and writes to its corresponding
-Zen file with a backup taken first.
+of which reads source-browser data through a snapshot copy of the
+underlying SQLite/plist file (so the source browser is never touched)
+and writes to its corresponding Zen file with a backup taken first.
 
-| Step | Reads (Arc) | Writes (Zen) |
+| Step | Reads | Writes (Zen) |
 | --- | --- | --- |
-| Spaces & pinned tabs | `StorableSidebar.json` | `zen-sessions.jsonlz4`, `containers.json` |
-| Bookmarks | `StorableSidebar.json` | `places.sqlite` |
-| Favicons | `Default/Favicons` | `favicons.sqlite`, plus inline `image` data URIs in `zen-sessions.jsonlz4` |
-| History | `Default/History` | `places.sqlite` |
-| Cookies | `Default/Cookies` (AES-128-CBC, key from macOS Keychain) | `cookies.sqlite` (incl. all per-space containers) |
+| Spaces & pinned tabs | source bookmarks (`StorableSidebar.json` / Chromium `Bookmarks` / `places.sqlite` / `Bookmarks.plist`) | `zen-sessions.jsonlz4`, `containers.json` |
+| Bookmarks | same as above | `places.sqlite` |
+| Favicons | Chromium `Favicons` SQLite (Arc/Chrome/Edge/Brave only) | `favicons.sqlite`, plus inline `image` data URIs in `zen-sessions.jsonlz4` |
+| History | Chromium `History` SQLite (Arc/Chrome/Edge/Brave only) | `places.sqlite` |
+| Cookies | Chromium `Cookies` SQLite (AES-128-CBC on macOS, AES-256-GCM on Windows) | `cookies.sqlite` (incl. per-space containers) |
+
+Firefox and Safari are bookmarks-only in v1 — their history and cookies
+need a Firefox→Firefox places merger and a `Cookies.binarycookies`
+parser respectively, neither of which ship in this release.
 
 A few things that took some reverse-engineering and might be useful if
 you're hacking on this:
@@ -177,7 +173,7 @@ modifying them. Architecture details are in [CLAUDE.md](./CLAUDE.md).
 
 - **"Zen profile not found"**: launch Zen once so it creates the
   profile, then click Recheck.
-- **"No Arc data found"**: make sure Arc has been opened at least
+- **"No browser data found"**: make sure your source browser has been opened at least
   once and has at least one pinned tab.
 - **Cookies didn't carry over**: close Zen completely before running
   (Firefox holds an exclusive lock on `cookies.sqlite` while open) and
@@ -199,18 +195,17 @@ The GUI uses PyWebView (Python) + vanilla HTML/CSS/JS with no build
 step.
 
 ```bash
-git clone https://github.com/rafcabezas/arc2zen.git
-cd arc2zen
+git clone https://github.com/tarikbc/browser2zen.git
+cd browser2zen
 pip install -r requirements.txt -r requirements-build.txt
-python3 migrate_arc_to_zen.py --dry-run --verbose   # CLI smoke test
-python -m app --debug                               # GUI with WebKit DevTools
+python -m app --debug   # GUI with WebKit DevTools
 ```
 
 To produce a `.dmg` locally:
 
 ```bash
-bash build/make_app.sh   # produces dist/Arc2Zen.app
-bash build/make_dmg.sh   # produces dist/Arc2Zen-<version>-arm64.dmg
+bash build/make_app.sh   # produces dist/browser2zen.app
+bash build/make_dmg.sh   # produces dist/browser2zen-<version>-arm64.dmg
 ```
 
 CI builds happen automatically on every `v*` git tag via
@@ -227,6 +222,6 @@ risk.
 
 ## Acknowledgements
 
-- Arc Browser team for the original product.
+- Arc Browser team for inspiring the original arc2zen project.
 - Zen Browser team for the privacy-focused alternative.
 - The open source community for inspiration and tools.

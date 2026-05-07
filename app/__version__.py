@@ -1,12 +1,12 @@
-"""Single source of truth for the Arc2Zen app version.
+"""Single source of truth for the browser2zen app version.
 
 Imported by:
 - ``app.bridge.Bridge.version()`` so the frontend can render it.
-- ``build/arc2zen.spec`` so the macOS Info.plist and Windows file
+- ``build/browser2zen.spec`` so the macOS Info.plist and Windows file
   metadata reflect the same value.
 
 Update this file when cutting a new tag; the matching ``v<version>``
 git tag triggers the GitHub Actions release workflow.
 """
 
-VERSION = "1.1.2"
+VERSION = "1.0.0"

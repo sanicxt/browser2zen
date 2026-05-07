@@ -1,17 +1,17 @@
-Arc2Zen — first launch
-=======================
+browser2zen — first launch
+==========================
 
-Arc2Zen is unsigned (no $99/year Apple or Microsoft developer
+browser2zen is unsigned (no $99/year Apple or Microsoft developer
 certificate), so the first time you open it the OS will block it. This
 is a one-time setup. Follow the steps for your platform exactly.
 
 
 ------ macOS ----------------------------------------------------------
 
-  Step 1.  Double-click Arc2Zen.app inside the mounted DMG.
+  Step 1.  Double-click browser2zen.app inside the mounted DMG.
 
-  Step 2.  macOS shows a dialog: "'Arc2Zen' is damaged and can't be
-           opened" or "Apple cannot check it for malicious software."
+  Step 2.  macOS shows a dialog: "'browser2zen' is damaged and can't
+           be opened" or "Apple cannot check it for malicious software."
            Click "Done" (or "Cancel"). DO NOT click "Move to Trash."
 
   Step 3.  Open System Settings (the gear icon in your Dock, or
@@ -20,25 +20,25 @@ is a one-time setup. Follow the steps for your platform exactly.
   Step 4.  In the sidebar, scroll down and click "Privacy & Security."
 
   Step 5.  Scroll down on the right side until you see this message:
-             "Arc2Zen was blocked to protect your Mac."
+             "browser2zen was blocked to protect your Mac."
            Click the "Open Anyway" button next to it.
 
   Step 6.  macOS asks for your Mac password — enter it.
 
   Step 7.  Another dialog appears: "macOS cannot verify the developer
-           of 'Arc2Zen'. Are you sure you want to open it?"
+           of 'browser2zen'. Are you sure you want to open it?"
            Click "Open Anyway".
 
-The app launches. After this you can double-click Arc2Zen.app any time
-without going through the steps again.
+The app launches. After this you can double-click browser2zen.app any
+time without going through the steps again.
 
 
 ------ Windows --------------------------------------------------------
 
 BEFORE EXTRACTING the .zip, do this once:
 
-  Step 1.  Right-click the downloaded Arc2Zen-*.zip in your Downloads
-           folder and choose "Properties."
+  Step 1.  Right-click the downloaded browser2zen-*.zip in your
+           Downloads folder and choose "Properties."
 
   Step 2.  At the bottom of the Properties dialog you'll see "Security:
            This file came from another computer..." with an "Unblock"
@@ -46,14 +46,15 @@ BEFORE EXTRACTING the .zip, do this once:
 
   (This strips the "Mark of the Web" tag from every file inside the
   zip in one shot. If you skip this step, every individual .dll inside
-  Arc2Zen will trip SmartScreen separately.)
+  browser2zen will trip SmartScreen separately.)
 
 THEN extract and run:
 
-  Step 3.  Double-click the .zip and drag the Arc2Zen folder to your
-           Desktop (or wherever you want).
+  Step 3.  Double-click the .zip and drag the browser2zen folder to
+           your Desktop (or wherever you want).
 
-  Step 4.  Open the Arc2Zen folder and double-click Arc2Zen.exe.
+  Step 4.  Open the browser2zen folder and double-click
+           browser2zen.exe.
 
   Step 5.  Windows shows "Windows protected your PC" with a Don't Run
            button. Click "More info" (small text under the title).
@@ -61,21 +62,21 @@ THEN extract and run:
   Step 6.  A "Run anyway" button appears. Click it.
 
 The app launches. When you're done with the migration, drag the
-Arc2Zen folder to the Recycle Bin. There's nothing to uninstall.
+browser2zen folder to the Recycle Bin. There's nothing to uninstall.
 
 
 ------ Why all these steps? ------------------------------------------
 
 Apple and Microsoft both charge developers for certificates that
-remove these prompts. Arc2Zen is free open-source software and those
-fees aren't worth passing on to users.
+remove these prompts. browser2zen is free open-source software and
+those fees aren't worth passing on to users.
 
 The macOS bundle is ad-hoc codesigned, so you can verify its contents
 have not been tampered with at any time:
 
-  codesign --verify --deep --strict /Volumes/Arc2Zen/Arc2Zen.app
+  codesign --verify --deep --strict /Volumes/browser2zen/browser2zen.app
 
 Both platforms are reproducible from source: see the build/ scripts
 in the repository.
 
-Source code: https://github.com/rafcabezas/arc2zen
+Source code: https://github.com/tarikbc/browser2zen

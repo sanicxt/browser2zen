@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Arc → Zen History Importer
+Chromium → Zen History Importer
 
-Copies Arc's browsing history (Chromium `History` SQLite) into Zen's
-Firefox-format `places.sqlite`. Handles WebKit→Unix time conversion and
-Chromium→Firefox transition mapping. Idempotent: re-running merges new
-visits without duplicating existing places/visits.
+Copies any Chromium-format ``History`` SQLite (Arc / Chrome / Edge /
+Brave) into Zen's Firefox-format ``places.sqlite``. Handles
+WebKit→Unix time conversion and Chromium→Firefox transition mapping.
+Idempotent: re-running merges new visits without duplicating existing
+places/visits.
+
+The orchestrator hands in a list of source ``History`` paths via
+``history_dbs=`` so the same code serves every Chromium browser.
 """
 
 from __future__ import annotations
@@ -75,13 +79,31 @@ def _reverse_host(url: str) -> str:
 
 
 class HistoryImporter:
-    def __init__(self, zen_profile: Path, dry_run: bool = False):
+    def __init__(
+        self,
+        zen_profile: Path,
+        dry_run: bool = False,
+        history_dbs: Optional[list[Path]] = None,
+    ):
+        # ``history_dbs`` lets the multi-source orchestrator inject paths
+        # from any Chromium-format browser (Chrome/Edge/Brave/Arc). When
+        # left as None we fall back to the original Arc-only lookup so the
+        # standalone CLI keeps working unchanged.
         self.zen_profile = Path(zen_profile)
         self.places_db = self.zen_profile / "places.sqlite"
         self.dry_run = dry_run
+        self._injected_dbs: Optional[list[Path]] = (
+            [Path(p) for p in history_dbs] if history_dbs is not None else None
+        )
         self._tempdir: Optional[Path] = None
 
-    def _arc_history_dbs(self) -> list[Path]:
+    def _history_dbs(self) -> list[Path]:
+        if self._injected_dbs is not None:
+            return [p for p in self._injected_dbs if p.is_file()]
+        # Standalone-CLI fallback: glob Arc's known data dirs. The
+        # orchestrator always passes ``history_dbs=`` so this path is
+        # only used when the legacy ``migrate.py`` runs without a
+        # configured source.
         roots: list[Path] = []
         home = Path.home()
         macos = home / "Library/Application Support/Arc/User Data"
@@ -97,7 +119,7 @@ class HistoryImporter:
 
     def _snapshot(self, src: Path) -> Path:
         if self._tempdir is None:
-            self._tempdir = Path(tempfile.mkdtemp(prefix="arc2zen_history_"))
+            self._tempdir = Path(tempfile.mkdtemp(prefix="browser2zen_history_"))
         dest = self._tempdir / f"{src.parent.name}_{src.name}.db"
         shutil.copy2(src, dest)
         for suffix in ("-wal", "-shm", "-journal"):
@@ -112,7 +134,7 @@ class HistoryImporter:
             self._tempdir = None
 
     def import_history(self, since_days: Optional[int] = None) -> dict:
-        """Import Arc history into places.sqlite.
+        """Import Chromium-format history into places.sqlite.
 
         since_days: only import visits newer than this many days. None = all.
         """
@@ -126,13 +148,13 @@ class HistoryImporter:
         if since_days:
             cutoff_unix_us = int((time.time() - since_days * 86400) * 1_000_000)
 
-        # Aggregate Arc data across profiles in memory.
+        # Aggregate source-browser data across profiles in memory.
         # Map url -> (title, total_visits, last_visit_unix_us, [(visit_unix_us, transition)])
         urls_to_data: dict[str, dict] = {}
         try:
-            for arc_db in self._arc_history_dbs():
-                logger.info(f"📖 Reading Arc history from {arc_db.parent.name}")
-                snap = self._snapshot(arc_db)
+            for db in self._history_dbs():
+                logger.info(f"📖 Reading history from {db.parent.name}")
+                snap = self._snapshot(db)
                 conn = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
                 conn.row_factory = sqlite3.Row
                 try:
@@ -174,7 +196,7 @@ class HistoryImporter:
             self._cleanup()
 
         logger.info(
-            f"🔍 Aggregated {len(urls_to_data)} URLs from Arc history "
+            f"🔍 Aggregated {len(urls_to_data)} URLs from history "
             f"({sum(d['visit_count'] for d in urls_to_data.values())} visits)"
         )
         if not urls_to_data:
@@ -300,7 +322,9 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    parser = argparse.ArgumentParser(description="Import Arc browsing history into Zen")
+    parser = argparse.ArgumentParser(
+        description="Import Chromium-format browsing history into Zen"
+    )
     parser.add_argument("--zen-profile", help="Zen profile name (partial match)")
     parser.add_argument("--since-days", type=int, help="Only import visits newer than N days")
     parser.add_argument("--dry-run", action="store_true")

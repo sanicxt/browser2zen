@@ -1,221 +1,155 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (and any other contributor reading this) when
+working on browser2zen.
 
-## Project Overview
+## What this is
 
-This is a Python-based migration tool that converts Arc browser spaces and pinned tabs into Zen browser workspaces. The tool focuses on preserving organizational structure while adapting to Zen's different architecture.
+A migration tool that moves your browser setup — workspaces, pinned
+tabs, bookmarks, history, login state — from Arc / Chrome / Edge /
+Brave / Firefox / Safari into [Zen Browser](https://zen-browser.app/).
 
-## Common Commands
+The user-facing surface is a single-window PyWebView app. Power users
+can drive the orchestrator programmatically.
 
-### Migration Commands
-
-```bash
-# Basic migration
-python3 migrate_arc_to_zen.py
-
-# Safe testing (recommended before real migration)
-python3 migrate_arc_to_zen.py --dry-run
-
-# Verbose logging for debugging
-python3 migrate_arc_to_zen.py --verbose
-```
-
-### GUI App
+## Run
 
 ```bash
-# Launch the PyWebView GUI (macOS)
-python -m app
-
-# Dev mode (opens WebKit DevTools)
-python -m app --debug
+pip install -r requirements.txt -r requirements-build.txt
+python -m app           # GUI
+python -m app --debug   # GUI with WebKit DevTools
 ```
 
-### Component Testing
+## Architecture
+
+The migration is a fixed pipeline of independent steps. Source-browser
+adaptation happens once at the top via a `BrowserExtractor`; everything
+downstream is source-agnostic.
+
+```
+BrowserExtractor.extract() → ExportData → to_legacy_dict()
+                                                │
+                                                ▼
+              ┌─── ZenSpaceImporter      → containers.json
+              ├─── ZenSessionsImporter   → zen-sessions.jsonlz4
+              ├─── ZenBookmarkImporter   → places.sqlite (moz_bookmarks)
+              ├─── FaviconImporter       → favicons.sqlite + inline data URIs
+              ├─── HistoryImporter       → places.sqlite (moz_places, moz_historyvisits)
+              └─── CookiesImporter       → cookies.sqlite (incl. per-container dupes)
+```
+
+### Source extractors (`src/extractors/`)
+
+| File | Source | Notes |
+|---|---|---|
+| `arc.py` | Arc | Wraps `arc_pinned_tab_extractor.py` (StorableSidebar.json parser, Spaces / Essentials / `childrenIds` ordering) |
+| `chromium.py` | _shared base_ | Profile discovery, Bookmarks-JSON walk, Chromium SQLite paths, cookie-key dispatch |
+| `chrome.py`, `edge.py`, `brave.py` | Chrome / Edge / Brave | Subclass `ChromiumExtractor`; only paths + Keychain service / process names differ |
+| `firefox.py` | Firefox | Reads `places.sqlite` `moz_bookmarks` directly; v1 is bookmarks-only (history+cookies need a Firefox→Firefox merger) |
+| `safari.py` | Safari | Parses `Bookmarks.plist`; bookmarks-only; surfaces a clean error code if Full Disk Access is missing on Sequoia |
+
+Every extractor lowers to the same `ExportData` payload, then
+`to_legacy_dict()` produces the dict shape the Zen-side writers
+consume. Only `extractors/arc.py` carries Arc-specific schema knowledge
+(Essentials, etc.).
+
+### Zen-side writers (`src/zen_*.py`)
+
+These are source-agnostic; they only know the legacy dict shape. The
+heavy ones reverse-engineer Firefox internals:
+
+- **`places::HashURL`** — 48-bit hash with prefix in upper 16 bits.
+  Lives in `zen_favicon_importer.py:hash_page_url` and is reused by
+  `chromium_history_importer.py` for `moz_places.url_hash`.
+- **`zen-sessions.jsonlz4`** is the source of truth for Zen's sidebar
+  tabs, NOT the `zen_pins` table. Modern Zen overwrites
+  `sessionstore.jsonlz4` from `zen-sessions.jsonlz4` on every launch,
+  so writing only the sessionstore is a no-op.
+- **Pinned-tab favicons** are read from each tab's inline `image` data
+  URI inside `zen-sessions.jsonlz4`, not from `favicons.sqlite`.
+  Writing only the SQLite store leaves the sidebar blank.
+- **`moz_cookies.expiry`** switched from seconds to milliseconds around
+  Firefox 108. Storing seconds makes Firefox treat every cookie as
+  expired in 1970 and purge them all on next startup.
+- **Container cookies** need `^userContextId=N` duplicates per
+  container so cookies are visible to per-space tabs.
+
+### Chromium readers (`src/chromium_*.py`, `src/zen_favicon_importer.py`)
+
+- `chromium_history_importer.py` — Chromium `History` SQLite → Firefox
+  `places.sqlite` (handles WebKit→Unix time, transition mapping).
+- `chromium_cookies_importer.py` — Chromium `Cookies` SQLite → Firefox
+  `cookies.sqlite`. macOS Keychain (PBKDF2 1003 / AES-128-CBC) on
+  macOS, DPAPI + AES-256-GCM on Windows. Per-browser Keychain service
+  name and Local State path come in via `__init__` kwargs.
+- `zen_favicon_importer.py` — Chromium `Favicons` SQLite → Firefox
+  `favicons.sqlite`, plus inline `image` data URI injection into
+  `zen-sessions.jsonlz4`.
+
+All three accept their per-source paths via `__init__` kwargs
+(`history_dbs=`, `cookie_dbs=`, `favicon_dbs=`); the orchestrator
+wires the chosen extractor's paths through.
+
+### GUI app (`app/`)
+
+- `app/orchestrator.py` — `MigrationOrchestrator`. Takes a
+  `BrowserExtractor`, drives the pipeline, emits `ProgressEvent` dicts.
+- `app/progress_bus.py` — `logging.Handler` that pushes records onto
+  a queue the JS frontend polls.
+- `app/env_check.py` — source + Zen detection, profile listing,
+  running-process check.
+- `app/browser_control.py` — graceful quit for Arc and Zen.
+  Other browsers go through their `BrowserExtractor.quit()` method.
+- `app/bridge.py` — JS bridge surface
+  (`window.pywebview.api.<method>`). Source picker, backups, preview,
+  start/cancel migration.
+- `app/window.py` — PyWebView frameless-with-vibrancy window setup.
+- `app/frontend/` — vanilla HTML+CSS+JS, no build step. Six brand
+  badges + Zen badge live under `assets/sources/`.
+
+### Adding a new source
+
+1. Create `src/extractors/<name>.py` subclassing `BrowserExtractor`
+   (or `ChromiumExtractor` if it's Chromium-family).
+2. Implement `extract()` to produce `ExportData` (one or more
+   `SpaceRecord`s).
+3. Add to the `EXTRACTORS` tuple in `src/extractors/__init__.py`.
+4. Drop the brand SVG into `app/frontend/assets/sources/<name>.svg`
+   and add the slug to `SOURCE_NAMES` in `app/frontend/app.js`.
+5. Add a brand-tinted background rule in `app/frontend/styles.css`
+   (`.brand-mark.<name>`).
+
+That's it — the picker, orchestrator, and Zen writers all pick it up
+without further changes.
+
+## Build
 
 ```bash
-# Test Arc data extraction
-python3 src/arc_pinned_tab_extractor.py
-
-# Test workspace mapping utilities
-python3 src/zen_workspace_mapper.py
+bash build/make_app.sh   # dist/browser2zen.app
+bash build/make_dmg.sh   # dist/browser2zen-<version>-arm64.dmg
+pwsh build/make_exe.ps1  # dist/browser2zen/browser2zen.exe (Windows)
+pwsh build/make_zip.ps1  # dist/browser2zen-<version>-win-x64.zip
 ```
 
-## Architecture Overview
+CI builds happen automatically on every `v*` tag via
+`.github/workflows/release.yml`.
 
-### Migration Pipeline (4-Step Process)
+## Database safety
 
-1. **Arc Data Extraction** - Extract from `~/Library/Application Support/Arc/StorableSidebar.json`
-2. **Zen Profile Discovery** - Locate Zen profiles in `~/Library/Application Support/zen/Profiles/`
-3. **Container/Workspace Creation** - Create Zen containers and workspaces for each Arc space
-4. **Database Import** - Import metadata to zen_pins and bookmarks
-5. **Session Injection** - Inject real tabs into `zen-sessions.jsonlz4` (key step)
+- Source-browser data is read-only — every reader works against a
+  `shutil.copy2`'d temp snapshot, never the live DB.
+- Every Zen-side write is preceded by a timestamped `.backup.<ts>`
+  copy in the same directory.
+- The Backups screen in the GUI restores or deletes those.
+- Zen has to be quit during migration so we don't fight its WAL lock.
 
-### Key Components
+## Conventions
 
-**`migrate_arc_to_zen.py`**
-
-- Main orchestrator with `Arc2ZenMigrator` class
-- Coordinates entire migration process
-- Handles dry-run mode, logging, database backups
-
-**`arc_pinned_tab_extractor.py`**
-
-- Most complex component (22KB)
-- Parses Arc's nested JSON structure with sync data
-- Preserves original sidebar ordering via global index tracking
-- Data classes: `ArcPinnedTab`, `ArcFolder`, `ArcSpace`
-
-**Zen Importer Components:**
-
-- `zen_pinned_tab_importer.py` - Direct import to `zen_pins` table
-- `zen_workspace_importer.py` - Creates workspaces in `zen_workspaces` table
-- `zen_space_importer.py` - Manages containers in `containers.json`
-- `zen_bookmark_importer.py` - Backup import as Firefox bookmarks
-- `zen_sessionstore_manager.py` - Manages `zen-sessions.jsonlz4` for open tabs
-- `zen_sessions_importer.py` - Modern Zen 1.18+ session writes
-- `zen_favicon_importer.py` - Arc favicons → Zen `favicons.sqlite` plus inline session image
-- `arc_history_importer.py` - Arc browsing history → Zen `places.sqlite`
-- `arc_cookies_importer.py` - Arc cookies (decrypted via macOS Keychain) → Zen `cookies.sqlite`
-
-**GUI App (`app/`)**
-
-The `app/` directory wraps the importer classes with a PyWebView-based
-single-window GUI. Architecture:
-
-- `app/orchestrator.py` — `MigrationOrchestrator` facade. Calls the
-  importer classes in `src/` in sequence and emits structured
-  `ProgressEvent` dicts through a `ProgressBus`.
-- `app/progress_bus.py` — `logging.Handler` subclass that pushes log
-  records onto a queue the JS frontend polls every 120 ms. Lets the
-  importers stay unchanged while the GUI gets streaming progress.
-- `app/env_check.py` — Arc/Zen detection, profile listing,
-  browser-running check.
-- `app/browser_control.py` — AppleScript-based `quit_browser()` and
-  `launch_zen()`.
-- `app/bridge.py` — JS bridge methods reachable as
-  `window.pywebview.api.<method>`. Includes backup management
-  (`list_backups`, `restore_backup`, `delete_backup`).
-- `app/window.py` — PyWebView frameless-with-vibrancy window setup,
-  `easy_drag=True` for native window dragging.
-- `app/frontend/` — vanilla HTML + CSS + JS (no build step). Uses
-  `createElement` exclusively (no `innerHTML` with user data).
-
-### Data Flow
-
-**Arc Source:**
-
-```
-StorableSidebar.json
-├── firebaseSyncState.syncData.spaceModels (space metadata + icons)
-├── sidebar.containers[1].items (tabs, folders, containers)
-├── sidebar.containers[1].spaces (space → containerIDs mapping)
-└── containerIDs: ['pinned', uuid, 'unpinned', uuid] per space
-```
-
-**Zen Target:**
-
-```
-Zen Profile/
-├── places.sqlite (main database)
-│   ├── zen_pins (pinned tab metadata — NOT used for rendering)
-│   ├── zen_workspaces (workspace definitions with icons/colors)
-│   └── moz_bookmarks (Firefox-style bookmarks backup)
-├── zen-sessions.jsonlz4 (SOURCE OF TRUTH for rendered tabs)
-├── containers.json (container/space definitions)
-└── prefs.js (active workspace preferences)
-```
-
-> **Critical insight**: Zen renders sidebar tabs from `zen-sessions.jsonlz4`,
-> NOT from the `zen_pins` database table. The DB stores metadata only.
-> `inject_session_tabs.py` handles this key step.
-
-## Important Implementation Details
-
-### Order Preservation (SOLVED - The Container childrenIds Solution)
-
-**✅ SOLUTION IMPLEMENTED**: Arc's exact visual ordering is now preserved using container-based extraction.
-
-**The Discovery:**
-Arc's storage order ≠ display order. Each space has a **container UUID** (not "pinned" string) that contains a `childrenIds` array with items in **exact Arc display order**.
-
-**Correct Data Structure:**
-
-```json
-// Each space has containerIDs like:
-space_data.containerIDs = ['unpinned', 'uuid-1', 'pinned', 'uuid-2']
-
-// The actual display order is in one of the UUID containers:
-data.sidebar.containers[1].items['BDF69180-4E9B-4B4A-B1B4-D6950292683E'].childrenIds = [
-  "ACEB0219-BA17-4ADC-BCCB-FF83840AE8DF",  // Finances folder (1st in Arc)
-  "4A4CEAC3-53C4-4D04-9EED-B3967CD11904",  // Large Language Models (2nd)
-  "BA5EC227-0247-4639-8125-0EA21C4554CC",  // Health folder (3rd)
-  // ... etc in exact Arc visual order
-]
-```
-
-**Key Insight:** The strings "pinned" and "unpinned" are markers in the `containerIDs` array. The UUID immediately *following* each marker is the actual container storing that category's `childrenIds` (display order). The marker order can vary — some spaces have `['pinned', uuid, 'unpinned', uuid]`, others have `['unpinned', uuid, 'pinned', uuid]`.
-
-**Implementation (Working):**
-
-```python
-def _get_space_display_order(self, space_id, items_lookup, data):
-    """Get pinned tab display order using the container after 'pinned' marker."""
-    space_container_ids = self._get_space_container_ids(space_id, data)
-    # Find the UUID immediately after the 'pinned' marker
-    for idx, cid in enumerate(space_container_ids):
-        if cid == 'pinned' and idx + 1 < len(space_container_ids):
-            pinned_uuid = space_container_ids[idx + 1]
-            # Look up its childrenIds — that's the display order
-            ...
-```
-
-**Results Achieved:**
-
-- **Before**: Site, Games, Large Language Models... (Arc index 6, 20, 24)
-- **After**: Finances, Large Language Models, Health, Games... (Arc visual order) ✅
-- **Perfect match**: Extraction now matches Arc sidebar exactly
-
-**Process Flow:**
-
-1. **Find space container UUIDs** from `space_data.containerIDs`
-2. **Locate display container** that has `childrenIds` array
-3. **Extract in order** using `childrenIds` sequence (not Arc index sorting)
-4. **Process recursively** for folder contents using their own `childrenIds`
-5. **Repeat for 'unpinned'** marker to get open tabs
-
-### Folder Hierarchy
-
-- Path-based folder UUID mapping: `folder_path → folder_uuid`
-- Recursive parent-child relationships via `folder_parent_uuid`
-- Folders created before tabs in proper dependency order
-
-### Database Safety
-
-- Read-only access to Arc data (never modifies original)
-- Automatic database backups before Zen modifications
-- Transaction-based operations with rollback capabilities
-- Zen browser must be closed during migration to prevent database locks
-
-### Generated Files
-
-- `arc_pinned_tabs_export.json` - Extracted Arc data
-- `zen_database_backup_*.sqlite` - Automatic backups
-- `workspace_setup_guide.json` - Manual setup instructions
-
-## Key Algorithms
-
-### UUID Management
-
-Temporary workspace UUIDs are created during import, then consolidated via `zen_workspace_mapper.py`. This prevents conflicts and allows proper cross-table relationship updates.
-
-### Container Assignment
-
-Round-robin icon/color assignment for new containers with existing container detection and reuse based on space names.
-
-## Development Notes
-
-- Python 3.7+ with `lz4` as the only external dependency
-- All components include extensive logging for debugging
-- Dry-run mode available for safe testing
-- Error handling includes graceful degradation and detailed error reporting
+- Python 3.7+, runtime deps are `lz4` and `cryptography`.
+- No build step for the frontend — use `createElement` + `textContent`
+  exclusively, never `innerHTML` with non-literal data.
+- Source-agnostic identifiers in shared code (`source`, `export_data`,
+  `db`); Arc-specific names only inside Arc-only files.
+- `1000`-decade Chromium DPAPI errors surface as
+  `chromium_local_state_missing` / `chromium_appbound_encryption` etc.
+  through the orchestrator → Bridge → frontend dialog mapping.

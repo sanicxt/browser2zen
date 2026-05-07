@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
 """
-Arc → Zen Cookies Importer
+Chromium → Zen Cookies Importer
 
-Decrypts Arc's Chromium-format cookies and writes them into Zen's
-Firefox-format `cookies.sqlite` so login sessions carry over.
+Decrypts any Chromium-format cookies (Arc / Chrome / Edge / Brave) and
+writes them into Zen's Firefox-format ``cookies.sqlite`` so login
+sessions carry over.
 
 Supports macOS and Windows:
 
-- **macOS**: master key fetched from the Keychain entry "Arc Safe Storage",
-  derived via PBKDF2 (1003 iterations, salt "saltysalt") to a 16-byte
-  AES-128 key. Cookie blobs prefixed `v10` use AES-128-CBC with an
-  all-spaces IV and PKCS7 padding.
-- **Windows**: master key read from `Local State` JSON, base64-decoded,
-  unwrapped via Windows DPAPI (`crypt32!CryptUnprotectData` through
-  ctypes). Cookie blobs prefixed `v10` use AES-256-GCM (12-byte nonce
-  + ciphertext + 16-byte authentication tag).
+- **macOS**: master key fetched from a per-browser Keychain entry
+  (``"Arc Safe Storage"`` / ``"Chrome Safe Storage"`` / ...), derived via
+  PBKDF2 (1003 iterations, salt ``"saltysalt"``) to a 16-byte AES-128 key.
+  Cookie blobs prefixed ``v10`` use AES-128-CBC with an all-spaces IV
+  and PKCS7 padding.
+- **Windows**: master key read from each browser's ``Local State`` JSON,
+  base64-decoded, unwrapped via Windows DPAPI
+  (``crypt32!CryptUnprotectData`` through ctypes). Cookie blobs prefixed
+  ``v10`` use AES-256-GCM (12-byte nonce + ciphertext + 16-byte
+  authentication tag).
 
-The Firefox-side write (`moz_cookies` insert, container duplication,
+The Firefox-side write (``moz_cookies`` insert, container duplication,
 ms-vs-seconds expiry handling) is identical across platforms. Re-running
 merges new cookies without duplicating existing ones.
+
+The orchestrator passes the source's cookie paths + matching Keychain
+service/account + Local State path via the importer's kwargs so the
+same code serves every Chromium browser.
 """
 
 from __future__ import annotations
@@ -121,7 +128,7 @@ class _DpapiError(RuntimeError):
         self.code = code
 
 
-def _arc_local_state_paths() -> list[Path]:
+def _local_state_paths_default() -> list[Path]:
     """Return Local State JSON candidates across both Windows install vectors."""
     home = Path.home()
     if os.name != "nt":
@@ -177,23 +184,31 @@ def _crypt_unprotect_data(blob: bytes) -> bytes:
         kernel32.LocalFree(out_blob.pbData)
 
 
-def _read_local_state_key_windows() -> bytes:
-    """Read Arc's ``Local State`` and unwrap the master key.
+def _read_local_state_key_windows(local_state_paths: Optional[list[Path]] = None) -> bytes:
+    """Read a Chromium browser's ``Local State`` and unwrap the master key.
+
+    ``local_state_paths`` is optional and lets callers point at any
+    Chromium installs (Chrome, Edge, Brave). When omitted we fall back
+    to Arc's bundled fallback locations.
 
     Raises ``_DpapiError`` with a structured code on any failure path.
     """
-    paths = _arc_local_state_paths()
+    paths = (
+        [Path(p) for p in local_state_paths if Path(p).is_file()]
+        if local_state_paths is not None
+        else _local_state_paths_default()
+    )
     if not paths:
         raise _DpapiError(
-            "arc_local_state_missing",
-            "Arc has not been launched on this Windows account yet.",
+            "chromium_local_state_missing",
+            "Browser has not been launched on this Windows account yet.",
         )
     state = json.loads(paths[0].read_text(encoding="utf-8"))
     encrypted_b64 = state.get("os_crypt", {}).get("encrypted_key")
     if not encrypted_b64:
         raise _DpapiError(
-            "arc_no_encrypted_key",
-            "Arc Local State has no os_crypt.encrypted_key entry.",
+            "chromium_no_encrypted_key",
+            "Local State has no os_crypt.encrypted_key entry.",
         )
 
     raw = base64.b64decode(encrypted_b64)
@@ -201,19 +216,19 @@ def _read_local_state_key_windows() -> bytes:
         # Chromium v20 / Brave / Edge app-bound encryption; not defeatable
         # without invoking Chromium's elevated COM service.
         raise _DpapiError(
-            "arc_appbound_encryption",
-            "Arc cookies use app-bound (v20) encryption.",
+            "chromium_appbound_encryption",
+            "Browser cookies use app-bound (v20) encryption.",
         )
     if not raw.startswith(b"DPAPI"):
         raise _DpapiError(
-            "arc_unknown_key_prefix",
+            "chromium_unknown_key_prefix",
             f"Unexpected key prefix {raw[:5]!r}",
         )
 
     key = _crypt_unprotect_data(raw[5:])
     if len(key) != 32:
         raise _DpapiError(
-            "arc_unexpected_key_length",
+            "chromium_unexpected_key_length",
             f"Got {len(key)}-byte key from DPAPI; expected 32 bytes.",
         )
     return key
@@ -260,8 +275,8 @@ def _strip_host_hash(plaintext: bytes) -> bytes:
 _SAMESITE_MAP = {-1: 3, 0: 0, 1: 1, 2: 2}
 
 
-def _arc_cookie_dbs() -> list[Path]:
-    """Locate every Arc profile's Cookies SQLite across both supported OSes.
+def _cookie_dbs_default() -> list[Path]:
+    """Locate every supported source-browser profile's Cookies SQLite across both supported OSes.
 
     Newer Chromium builds nest the file as ``<profile>/Network/Cookies``;
     older builds keep it at ``<profile>/Cookies``. We accept either.
@@ -302,16 +317,31 @@ class CookiesImporter:
         zen_profile: Path,
         dry_run: bool = False,
         container_ids: Optional[list[int]] = None,
+        cookie_dbs: Optional[list[Path]] = None,
+        keychain_service: str = "Arc Safe Storage",
+        keychain_account: str = "Arc",
+        local_state_paths: Optional[list[Path]] = None,
     ):
+        # ``cookie_dbs`` injects per-browser cookie SQLite paths; the
+        # other three knobs let any Chromium browser (Chrome/Edge/Brave)
+        # reuse this importer without touching the decrypt logic.
         self.zen_profile = Path(zen_profile)
         self.zen_cookies = self.zen_profile / "cookies.sqlite"
         self.dry_run = dry_run
         self.container_ids = container_ids or []
+        self._injected_dbs: Optional[list[Path]] = (
+            [Path(p) for p in cookie_dbs] if cookie_dbs is not None else None
+        )
+        self._keychain_service = keychain_service
+        self._keychain_account = keychain_account
+        self._local_state_paths: Optional[list[Path]] = (
+            [Path(p) for p in local_state_paths] if local_state_paths is not None else None
+        )
         self._tempdir: Optional[Path] = None
 
     def _snapshot(self, src: Path) -> Path:
         if self._tempdir is None:
-            self._tempdir = Path(tempfile.mkdtemp(prefix="arc2zen_cookies_"))
+            self._tempdir = Path(tempfile.mkdtemp(prefix="browser2zen_cookies_"))
         dest = self._tempdir / f"{src.parent.name}_{src.name}.db"
         shutil.copy2(src, dest)
         for suffix in ("-wal", "-shm", "-journal"):
@@ -392,14 +422,17 @@ class CookiesImporter:
         Hides macOS Keychain vs Windows DPAPI behind a single dispatch.
         """
         if sys.platform == "darwin":
-            password = _read_keychain_password()
+            password = _read_keychain_password(
+                service=self._keychain_service,
+                account=self._keychain_account,
+            )
             if password is None:
                 return b"", _decrypt_v10_cbc, "keychain_denied"
             return _derive_aes_key_macos(password), _decrypt_v10_cbc, None
 
         if os.name == "nt":
             try:
-                key = _read_local_state_key_windows()
+                key = _read_local_state_key_windows(self._local_state_paths)
             except _DpapiError as exc:
                 logger.error(f"DPAPI key unwrap failed: {exc} ({exc.code})")
                 return b"", _decrypt_v10_gcm, exc.code
@@ -421,10 +454,15 @@ class CookiesImporter:
             return result
 
         cookies: list[dict] = []
+        cookie_dbs = (
+            [p for p in self._injected_dbs if p.is_file()]
+            if self._injected_dbs is not None
+            else _cookie_dbs_default()
+        )
         try:
-            for arc_db in _arc_cookie_dbs():
-                logger.info(f"📖 Reading Arc cookies from {arc_db.parent.name}")
-                snap = self._snapshot(arc_db)
+            for db in cookie_dbs:
+                logger.info(f"📖 Reading cookies from {db.parent.name}")
+                snap = self._snapshot(db)
                 conn = sqlite3.connect(f"file:{snap}?mode=ro", uri=True)
                 # encrypted_value is binary; some Chromium builds also stash
                 # bytes in TEXT columns. Tell sqlite3 not to UTF-8-decode anything,
@@ -448,7 +486,7 @@ class CookiesImporter:
         finally:
             self._cleanup()
 
-        logger.info(f"🔍 Decoded {len(cookies)} of {result['read']} cookies from Arc")
+        logger.info(f"🔍 Decoded {len(cookies)} of {result['read']} cookies from source browser")
         if not cookies:
             return result
 
@@ -573,7 +611,7 @@ def main() -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-    parser = argparse.ArgumentParser(description="Import Arc cookies into Zen")
+    parser = argparse.ArgumentParser(description="Import Chromium-format cookies into Zen")
     parser.add_argument("--zen-profile", help="Zen profile name (partial match)")
     parser.add_argument(
         "--containers",

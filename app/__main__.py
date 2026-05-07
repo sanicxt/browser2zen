@@ -19,7 +19,7 @@ def _set_windows_app_user_model_id() -> None:
     """Tell Windows that this process is its own application.
 
     Without this, the WebView2 host inherits Python's default AppUserModelID
-    and Windows groups every Arc2Zen launch under a generic "Python" entry
+    and Windows groups every browser2zen launch under a generic "Python" entry
     in the taskbar. Setting it makes the icon, taskbar grouping, and pin
     behaviour all line up correctly.
     """
@@ -28,14 +28,14 @@ def _set_windows_app_user_model_id() -> None:
     try:
         import ctypes
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-            "com.arc2zen.app"
+            "com.browser2zen.app"
         )
     except Exception:
         pass
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(prog="arc2zen", description="Arc to Zen migration GUI")
+    parser = argparse.ArgumentParser(prog="browser2zen", description="Browser → Zen migration GUI")
     parser.add_argument("--debug", action="store_true", help="Enable WebKit devtools and verbose logging")
     args = parser.parse_args()
 
