@@ -171,7 +171,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-build.txt
-          pip install pygobject pycairo
+          # Pin pygobject < 3.50 so it builds against girepository-1.0
+          # (what gir1.2-webkit2-4.1 / Ubuntu 22.04 provides). 3.50+
+          # requires girepository-2.0, only available in Ubuntu 24+.
+          pip install 'pygobject<3.50' pycairo
 
       - name: Build .tar.gz
         env:
