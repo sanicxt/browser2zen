@@ -84,13 +84,19 @@ CATEGORY_FILES: dict[str, tuple[str, ...]] = {
         "addonStartup.json.lz4",
         "extensions",   # directory; recursed below
     ),
+    "mods": (
+        # Zen Mods (UI customisations, themes) live in the profile's
+        # chrome/ directory: userChrome.css, userContent.css, plus any
+        # per-mod subfolders the Zen Mods feature drops in there.
+        "chrome",       # directory; recursed below — captures everything
+    ),
 }
 
 # All categories in canonical order — used as default for "include
 # everything in the archive" on the importer.
 ALL_CATEGORIES = tuple(CATEGORY_FILES.keys())
 
-DEFAULT_CATEGORIES = ("workspaces", "browsing", "cookies", "favicons")
+DEFAULT_CATEGORIES = ("workspaces", "browsing", "cookies", "favicons", "mods")
 
 # SQLite file suffixes that must travel with the main file.
 _SQLITE_SIBLINGS = ("-wal", "-shm", "-journal")
@@ -341,7 +347,14 @@ class ZenBackupImporter:
 
         active_files: set[str] = set()
         for cat in active:
-            for f in CATEGORY_FILES[cat]:
+            cat_files = CATEGORY_FILES.get(cat)
+            if cat_files is None:
+                # Forward-compat: a newer browser2zen could have written
+                # an archive with a category we don't know about. Skip
+                # cleanly instead of KeyError-ing.
+                result["skipped"].append({"category": cat, "reason": "unknown_category"})
+                continue
+            for f in cat_files:
                 # Both the file itself and any directory prefix are
                 # recorded so the per-member filter below can match
                 # extension subdirectories like ``extensions/abc/...``.

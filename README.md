@@ -147,9 +147,9 @@ welcome screen, click **Backup or restore Zen** and pick a direction:
 
 - **Export** bundles your current Zen profile into a single
   `.zenbackup` file (gzipped tarball with a `manifest.json`). Pick which
-  categories to include — workspaces, browsing data, login state and
-  favicons are on by default; saved passwords, preferences and
-  extensions are opt-in because they're more fragile across machines.
+  categories to include — workspaces, browsing data, login state,
+  favicons, and Zen Mods are on by default; saved passwords, preferences
+  and extensions are opt-in because they're more fragile across machines.
 - **Restore** opens an existing `.zenbackup` and writes its contents
   into a Zen profile on this machine. Each target file gets a
   timestamped backup before it's overwritten.

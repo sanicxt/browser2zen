@@ -34,6 +34,8 @@ const CATEGORIES = [
     caveat: "A few prefs reference absolute paths from the source machine." },
   { id: "extensions", label: "Extensions",                        default: false,
     caveat: "Extensions need to be compatible with the target machine's Zen version." },
+  { id: "mods",       label: "Zen Mods (UI customisations)",      default: true,
+    caveat: "If a mod targets a specific Zen version, the same Zen version is needed on the target." },
 ];
 
 const ENV_REPORT = {
@@ -49,7 +51,7 @@ const ENV_REPORT = {
 window.pywebview = {
   api: {
     platform:                async () => "mac",
-    version:                 async () => "1.2.0",
+    version:                 async () => "1.2.2",
     list_sources:            async () => SOURCES,
     set_source:              async (name) => {
       const found = SOURCES.find((s) => s.name === name) || SOURCES[0];
