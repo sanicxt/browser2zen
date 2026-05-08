@@ -256,4 +256,91 @@ def test_export_unknown_category(source_profile, tmp_path):
 
 def test_all_categories_includes_defaults():
     assert set(DEFAULT_CATEGORIES) <= set(ALL_CATEGORIES)
-    assert set(DEFAULT_CATEGORIES) == {"workspaces", "browsing", "cookies", "favicons"}
+    assert set(DEFAULT_CATEGORIES) == {
+        "workspaces", "browsing", "cookies", "favicons", "mods",
+    }
+
+
+# ----- Zen Mods round-trip ------------------------------------------------
+
+def test_mods_roundtrip(source_profile, empty_profile, tmp_path):
+    archive = tmp_path / "mods.zenbackup"
+    result = ZenBackupExporter(
+        source_profile, archive, includes=["mods"],
+    ).export()
+    assert result["ok"], result
+
+    # The fixture's chrome/userChrome.css should be in the archive.
+    with tarfile.open(archive, "r:gz") as tar:
+        members = sorted(m.name for m in tar.getmembers() if m.isfile())
+    assert "profile/chrome/userChrome.css" in members
+    # And nothing from the unrelated categories.
+    assert "profile/places.sqlite" not in members
+
+    restore = ZenBackupImporter(
+        archive, empty_profile, includes=["mods"],
+    ).import_archive()
+    assert restore["ok"], restore
+    landed = empty_profile / "chrome" / "userChrome.css"
+    assert landed.is_file()
+    expected = (source_profile / "chrome" / "userChrome.css").read_bytes()
+    assert landed.read_bytes() == expected
+
+
+# ----- Restore preserves untouched mod siblings on the target ------------
+
+def test_mods_restore_is_additive(source_profile, empty_profile, tmp_path):
+    archive = tmp_path / "mods.zenbackup"
+    ZenBackupExporter(source_profile, archive, includes=["mods"]).export()
+
+    # Pre-seed a mod the archive doesn't carry.
+    target_chrome = empty_profile / "chrome"
+    target_chrome.mkdir(exist_ok=True)
+    sentinel = target_chrome / "other-mod.css"
+    sentinel.write_text("/* user's local mod */")
+
+    result = ZenBackupImporter(
+        archive, empty_profile, includes=["mods"],
+    ).import_archive()
+    assert result["ok"], result
+
+    # The archive's userChrome.css landed.
+    assert (target_chrome / "userChrome.css").is_file()
+    # The user's untouched local mod is still there (additive merge —
+    # same semantics extensions/ already use).
+    assert sentinel.is_file()
+    assert sentinel.read_text() == "/* user's local mod */"
+
+
+# ----- Forward-compat: importer skips unknown categories cleanly ---------
+
+def test_unknown_category_is_skipped_not_fatal(source_profile, empty_profile, tmp_path):
+    archive = tmp_path / "future.zenbackup"
+    ZenBackupExporter(source_profile, archive,
+                      includes=list(DEFAULT_CATEGORIES)).export()
+
+    # Hand-rewrite the manifest so it advertises a category this version
+    # of browser2zen doesn't know about.
+    extracted = tmp_path / "extracted"
+    extracted.mkdir()
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(extracted)
+    manifest_path = extracted / "manifest.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["included"].append("future-cat")
+    manifest_path.write_text(json.dumps(manifest))
+    archive.unlink()
+    with tarfile.open(archive, "w:gz") as tar:
+        for f in extracted.rglob("*"):
+            if f.is_file():
+                tar.add(f, arcname=str(f.relative_to(extracted)))
+
+    # Restore everything in the manifest. The unknown category should
+    # show up in skipped, not blow up the whole restore.
+    result = ZenBackupImporter(archive, empty_profile).import_archive()
+    assert result["ok"] is True, result
+    skipped_cats = [s.get("category") for s in result["skipped"]
+                    if "category" in s]
+    assert "future-cat" in skipped_cats
+    # The known categories still land.
+    assert (empty_profile / "places.sqlite").is_file()

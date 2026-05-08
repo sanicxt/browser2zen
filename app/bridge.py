@@ -400,6 +400,11 @@ class Bridge:
              "caveat": "Extensions need to be compatible with the target "
                        "machine's Zen version. Mismatches can leave "
                        "extensions disabled. Adds the most archive size."},
+            {"id": "mods", "label": "Zen Mods (UI customisations)",
+             "default": True,
+             "caveat": "If a mod targets a specific Zen version, the same "
+                       "Zen version is needed on the target for it to "
+                       "render correctly."},
         ]
 
     def choose_path(self, kind: str, default_name: str = "") -> str | None:

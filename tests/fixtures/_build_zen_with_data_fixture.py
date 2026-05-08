@@ -167,6 +167,22 @@ def _write_zen_sessions(out: Path) -> None:
     _write_mozlz4(out, sessions)
 
 
+_USER_CHROME_CSS = """\
+/* Test fixture Zen Mod — recolour the toolbar so the round-trip test
+   has something deterministic to check.  */
+:root {
+  --toolbar-bg: #1a1a1a;
+}
+"""
+
+
+def _write_zen_mods(profile: Path) -> None:
+    """Drop a chrome/userChrome.css so the mods category has content."""
+    chrome = profile / "chrome"
+    chrome.mkdir(exist_ok=True)
+    (chrome / "userChrome.css").write_text(_USER_CHROME_CSS)
+
+
 def main() -> None:
     PROFILE.mkdir(parents=True, exist_ok=True)
     _populate_places(PROFILE / "places.sqlite")
@@ -177,6 +193,7 @@ def main() -> None:
     # Some Zen profiles also have a sessionstore.jsonlz4; mirror it from
     # zen-sessions so the backup flow has a second file to handle.
     _write_zen_sessions(PROFILE / "sessionstore.jsonlz4")
+    _write_zen_mods(PROFILE)
     print(f"wrote zen-with-data fixture under {PROFILE}")
 
 

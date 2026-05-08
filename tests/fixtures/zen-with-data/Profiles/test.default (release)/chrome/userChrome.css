@@ -1,0 +1,5 @@
+/* Test fixture Zen Mod — recolour the toolbar so the round-trip test
+   has something deterministic to check.  */
+:root {
+  --toolbar-bg: #1a1a1a;
+}
