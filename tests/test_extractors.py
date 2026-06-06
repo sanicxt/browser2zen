@@ -80,6 +80,50 @@ def test_chrome_cookie_db_paths(chrome_home):
     assert any(p.name == "Cookies" for p in paths)
 
 
+def test_chromium_quit_escalates_to_force_kill(monkeypatch):
+    """When a graceful quit is ignored, quit() must escalate to a forced
+    kill rather than just timing out (regression: Brave wouldn't quit)."""
+    import extractors.chromium as chromium
+    from extractors import BraveExtractor
+
+    ext = BraveExtractor()
+    state = {"running": True, "cmds": []}
+
+    def fake_run(cmd, **kwargs):
+        state["cmds"].append(cmd)
+        # Only a forced kill actually stops it: pkill -KILL (macOS) or
+        # taskkill /f (Windows). A polite quit is ignored.
+        if cmd[0] == "pkill" and "-KILL" in cmd:
+            state["running"] = False
+        if cmd[0] == "taskkill" and "/f" in cmd:
+            state["running"] = False
+
+        class _R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        return _R()
+
+    # Fake clock so the 6s graceful deadline elapses without real waiting.
+    clock = {"t": 1000.0}
+    monkeypatch.setattr(chromium.time, "time", lambda: clock["t"])
+    monkeypatch.setattr(chromium.time, "sleep",
+                        lambda s: clock.__setitem__("t", clock["t"] + s))
+    monkeypatch.setattr(chromium.subprocess, "run", fake_run)
+    monkeypatch.setattr(ext, "is_running", lambda: state["running"])
+
+    result = ext.quit()
+
+    assert result["ok"] is True
+    assert result.get("forced") is True
+    assert state["running"] is False
+    # A forced kill command must have been issued.
+    forced = [c for c in state["cmds"]
+              if ("-KILL" in c) or (c[0] == "taskkill" and "/f" in c)]
+    assert forced, "expected a forced-kill command to be issued"
+
+
 # ----- Firefox ------------------------------------------------------------
 
 def test_firefox_extractor_detects_fixture(firefox_home):
@@ -140,6 +184,40 @@ def test_firefox_extractor_detects_linux_packaged_install(
 
     # Re-anchor the Firefox fixture tree under the packaged root instead
     # of the macOS ``Library/Application Support/Firefox`` location.
+    for src in fixtures.rglob("*"):
+        if src.is_file():
+            dest = home / root_rel / src.relative_to(fixtures)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+
+    ext = FirefoxExtractor()
+    assert ext.is_installed() is True
+    data = ext.extract()
+    assert data.source == "firefox"
+    assert len(data.spaces) == 1
+
+
+def test_firefox_extractor_detects_windows_store_msix(tmp_path, monkeypatch):
+    """Microsoft Store (MSIX) Firefox sandboxes its profile under the
+    package container; detection must look there too (regression for the
+    Win11 report where both browser2zen and Zen missed a Store Firefox)."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    from extractors import FirefoxExtractor
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "firefox"
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    # MSIX container path with a publisher-id suffix we don't hardcode.
+    root_rel = (
+        "AppData/Local/Packages/Mozilla.Firefox_n80bbvh6b1yt2"
+        "/LocalCache/Roaming/Mozilla/Firefox"
+    )
     for src in fixtures.rglob("*"):
         if src.is_file():
             dest = home / root_rel / src.relative_to(fixtures)

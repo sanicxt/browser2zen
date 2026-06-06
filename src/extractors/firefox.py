@@ -63,19 +63,38 @@ _ROOT_IDS = {
 def _firefox_profiles_roots() -> list[Path]:
     """Every plausible Firefox profiles root for the current OS.
 
-    On Linux the profile location depends on how Firefox was packaged:
-    a classic distro/apt install uses ``~/.mozilla/firefox``, but the
-    Snap build (the default on Ubuntu 22.04+) lives under
-    ``~/snap/firefox/common/.mozilla/firefox`` and the Flatpak build
-    under ``~/.var/app/org.mozilla.firefox/.mozilla/firefox``. We probe
-    all three so a Snap/Flatpak user isn't told Firefox is "not
+    The location depends on how Firefox was packaged:
+
+    - Windows: a regular install uses ``%APPDATA%\\Mozilla\\Firefox``,
+      but the Microsoft Store (MSIX) build sandboxes its profile inside
+      the package container at
+      ``%LOCALAPPDATA%\\Packages\\Mozilla.Firefox_<id>\\LocalCache\\Roaming\\Mozilla\\Firefox``.
+      The standard path is empty for those installs, which is why both
+      browser2zen and Zen's own importer otherwise miss a Store Firefox.
+    - Linux: a classic distro/apt install uses ``~/.mozilla/firefox``,
+      the Snap build (Ubuntu 22.04+ default) lives under
+      ``~/snap/firefox/common/.mozilla/firefox`` and the Flatpak build
+      under ``~/.var/app/org.mozilla.firefox/.mozilla/firefox``.
+
+    We probe all of them so a packaged install isn't reported as "not
     installed".
     """
     home = Path.home()
     if sys.platform == "darwin":
         return [home / "Library/Application Support/Firefox"]
-    if os.name == "nt":
-        return [home / "AppData/Roaming/Mozilla/Firefox"]
+    if sys.platform == "win32":
+        roots = [home / "AppData/Roaming/Mozilla/Firefox"]
+        # Microsoft Store (MSIX) Firefox — glob the package container so
+        # we match whatever publisher-id suffix this machine has (and
+        # Beta/Nightly Store builds too).
+        packages = home / "AppData/Local/Packages"
+        if packages.is_dir():
+            try:
+                for pkg in sorted(packages.glob("Mozilla.Firefox*")):
+                    roots.append(pkg / "LocalCache/Roaming/Mozilla/Firefox")
+            except OSError:
+                pass
+        return roots
     return [
         home / ".mozilla/firefox",
         home / "snap/firefox/common/.mozilla/firefox",

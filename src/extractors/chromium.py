@@ -147,8 +147,11 @@ class ChromiumExtractor(BrowserExtractor):
                     capture_output=True, timeout=3,
                 )
             except Exception as exc:
-                return {"ok": False, "running": True,
-                        "elapsed": time.time() - started, "error": str(exc)}
+                # A failed Apple event shouldn't leave the browser
+                # running — fall through to the forced-kill escalation
+                # below rather than bailing out here.
+                logger.warning("osascript quit for %s failed: %s",
+                               self.macos_app_name, exc)
         elif os.name == "nt":
             for image in self.windows_process_names:
                 try:
@@ -160,15 +163,56 @@ class ChromiumExtractor(BrowserExtractor):
             return {"ok": False, "running": self.is_running(),
                     "elapsed": 0.0,
                     "error": "graceful quit only supports macOS and Windows"}
+
         deadline = started + 6.0
         while time.time() < deadline:
             if not self.is_running():
                 return {"ok": True, "running": False,
                         "elapsed": time.time() - started}
             time.sleep(0.25)
+
+        # Graceful quit timed out. Chromium browsers routinely ignore a
+        # polite quit — utility/GPU child processes have no window to
+        # receive WM_CLOSE on Windows, and "keep running in the
+        # background" leaves a process alive on macOS. Escalate to a
+        # forced kill, mirroring the Arc/Zen path in
+        # ``app/browser_control.py`` so the user isn't stuck on
+        # "browser is still running".
+        if self._force_kill() and not self.is_running():
+            return {"ok": True, "running": False, "forced": True,
+                    "elapsed": time.time() - started}
+
         return {"ok": False, "running": True,
                 "elapsed": time.time() - started,
-                "error": "browser did not quit within timeout"}
+                "error": "browser did not quit even after a forced kill"}
+
+    def _force_kill(self) -> bool:
+        """Best-effort hard kill of every browser process. Returns True if
+        a kill command was issued (not whether the process actually died —
+        the caller re-checks ``is_running``)."""
+        issued = False
+        if sys.platform == "darwin":
+            for path in self.macos_process_paths:
+                for sig in ("-TERM", "-KILL"):
+                    try:
+                        subprocess.run(["pkill", sig, "-f", path],
+                                       capture_output=True, timeout=3)
+                        issued = True
+                    except Exception:
+                        continue
+                    time.sleep(0.5)
+                    if not self.is_running():
+                        return True
+        elif os.name == "nt":
+            for image in self.windows_process_names:
+                try:
+                    subprocess.run(["taskkill", "/f", "/im", image],
+                                   capture_output=True, timeout=3)
+                    issued = True
+                except Exception:
+                    continue
+            time.sleep(0.5)
+        return issued
 
     # ---------- chromium-style data paths ----------
 
