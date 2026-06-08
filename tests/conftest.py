@@ -46,6 +46,8 @@ _SOURCE_TREES = {
             "Library/Application Support/Google/Chrome/Default/Favicons",
         "chrome/User Data/Default/Cookies":
             "Library/Application Support/Google/Chrome/Default/Cookies",
+        "chrome/User Data/Default/Sessions/Session_13400000000000000":
+            "Library/Application Support/Google/Chrome/Default/Sessions/Session_13400000000000000",
         "chrome/User Data/Local State":
             "Library/Application Support/Google/Chrome/Local State",
     },

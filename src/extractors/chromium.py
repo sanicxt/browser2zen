@@ -420,6 +420,32 @@ class ChromiumExtractor(BrowserExtractor):
 
     # ---------- extraction ----------
 
+    def _read_session_tabs(
+        self, profile: Path,
+    ) -> tuple[list[TabRecord], list[TabRecord]]:
+        """Recover the profile's live tab strip from Chromium's SNSS session
+        store, split into (pinned, open). Best-effort: a missing or
+        unreadable session yields ``([], [])`` so a profile with only
+        bookmarks still migrates.
+        """
+        from ._snss import find_session_file, read_session_tabs
+
+        session = find_session_file(profile)
+        if session is None:
+            return [], []
+        try:
+            tabs = read_session_tabs(session)
+        except Exception as exc:
+            logger.warning("could not read session store for %s: %s", profile, exc)
+            return [], []
+
+        pinned: list[TabRecord] = []
+        opened: list[TabRecord] = []
+        for t in tabs:
+            rec = TabRecord(url=t.url, title=t.title, is_essential=False)
+            (pinned if t.pinned else opened).append(rec)
+        return pinned, opened
+
     def extract(self) -> ExportData:
         profiles = self.profile_paths()
         if not profiles:
@@ -431,19 +457,26 @@ class ChromiumExtractor(BrowserExtractor):
         spaces: list[SpaceRecord] = []
         for profile in profiles:
             space_id = self._stable_space_id(profile.name)
-            tabs, folders = self._parse_bookmarks(profile, space_id)
-            if not tabs and not folders:
+            # Bookmarks → the dedicated bookmark channel (Zen bookmarks).
+            # Real tab-strip pinned/open tabs → the sidebar channels.
+            # These are distinct concepts in every Chromium browser, so we
+            # no longer conflate bookmarks into the pinned sidebar.
+            bookmarks, bookmark_folders = self._parse_bookmarks(profile, space_id)
+            pinned_tabs, open_tabs = self._read_session_tabs(profile)
+            if not (bookmarks or bookmark_folders or pinned_tabs or open_tabs):
                 continue
             spaces.append(SpaceRecord(
                 space_id=space_id,
                 space_name=self._profile_display_name(profile),
-                pinned_tabs=tabs,
-                open_tabs=[],
-                folders=folders,
+                pinned_tabs=pinned_tabs,
+                open_tabs=open_tabs,
+                folders=[],
+                bookmarks=bookmarks,
+                bookmark_folders=bookmark_folders,
             ))
         if not spaces:
             raise BrowserExtractorError(
-                f"no_{self.name}_bookmarks",
-                f"{self.display_name} has no bookmarks to migrate.",
+                f"no_{self.name}_data",
+                f"{self.display_name} has no tabs or bookmarks to migrate.",
             )
         return ExportData(source=self.name, spaces=spaces)

@@ -43,7 +43,8 @@ BrowserExtractor.extract() → ExportData → to_legacy_dict()
 | File | Source | Notes |
 |---|---|---|
 | `arc.py` | Arc | Wraps `arc_pinned_tab_extractor.py` (StorableSidebar.json parser, Spaces / Essentials / `childrenIds` ordering) |
-| `chromium.py` | _shared base_ | Profile discovery, Bookmarks-JSON walk, Chromium SQLite paths, cookie-key dispatch |
+| `chromium.py` | _shared base_ | Profile discovery, Bookmarks-JSON walk, SNSS session read (`_snss.py`), Chromium SQLite paths, cookie-key dispatch |
+| `_snss.py` | _shared base_ | Parses Chromium's binary SessionService file (`<profile>/Sessions/Session_*`) to recover the real tab-strip **pinned + open tabs**. Bookmarks are NOT pinned tabs |
 | `chrome.py`, `edge.py`, `brave.py` | Chrome / Edge / Brave | Subclass `ChromiumExtractor`; only paths + Keychain service / process names differ |
 | `firefox.py` | Firefox | Reads `places.sqlite` `moz_bookmarks` directly; v1 is bookmarks-only (history+cookies need a Firefox→Firefox merger) |
 | `safari.py` | Safari | Parses `Bookmarks.plist`; bookmarks-only; surfaces a clean error code if Full Disk Access is missing on Sequoia |
@@ -52,6 +53,16 @@ Every extractor lowers to the same `ExportData` payload, then
 `to_legacy_dict()` produces the dict shape the Zen-side writers
 consume. Only `extractors/arc.py` carries Arc-specific schema knowledge
 (Essentials, etc.).
+
+**Pinned tabs vs bookmarks are distinct channels.** `pinned_tabs` /
+`open_tabs` are the Zen *sidebar* tabs (→ `ZenSessionsImporter`);
+`bookmarks` / `bookmark_folders` are the bookmark backup (→
+`ZenBookmarkImporter`). For Chromium the sidebar tabs come from the SNSS
+session and bookmarks come from the `Bookmarks` JSON — they must not be
+conflated, or you flood the sidebar with every bookmark. When an
+extractor leaves `bookmarks`/`bookmark_folders` as `None`,
+`to_legacy_dict()` falls them back to `pinned_tabs`/`folders`, so
+bookmark-only sources (Arc/Firefox/Safari) are unaffected.
 
 ### Zen-side writers (`src/zen_*.py`)
 
