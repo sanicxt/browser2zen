@@ -483,6 +483,13 @@ def _iter_pinned_urls(extracted: dict) -> Iterable[str]:
             url = tab.get("url")
             if url:
                 yield url
+        # Bookmarks ride their own channel on sources that separate them
+        # (Chromium); seed their favicons too. Falls back gracefully to
+        # nothing on sources that don't set it.
+        for tab in space.get("bookmarks", []) or []:
+            url = tab.get("url")
+            if url:
+                yield url
         for folder in space.get("folders", []) or []:
             for tab in folder.get("tabs", []) or []:
                 url = tab.get("url")

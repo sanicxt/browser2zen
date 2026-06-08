@@ -55,3 +55,43 @@ def test_legacy_dict_shape(request, extractor_name, home_fixture):
             missing_f = _REQUIRED_FOLDER_KEYS - set(folder.keys())
             assert not missing_f, f"{extractor_name} folder missing keys: {missing_f}"
             assert isinstance(folder["children_ids"], list)
+
+
+# --- bookmarks channel ----------------------------------------------------
+# Bookmarks travel in their own ``bookmarks`` / ``bookmark_folders`` keys so
+# that a source's real pinned tabs (pinned_tabs) and its bookmarks no longer
+# share a channel. When an extractor doesn't set them, they fall back to
+# pinned_tabs / folders so bookmark-only sources keep working unchanged.
+
+def _make_space(**kw):
+    from extractors.base import SpaceRecord
+    return SpaceRecord(space_id="s1", space_name="S1", **kw)
+
+
+def test_bookmarks_default_to_pinned_tabs_when_unset():
+    from extractors.base import ExportData, FolderRecord, TabRecord
+
+    space = _make_space(
+        pinned_tabs=[TabRecord(url="https://pin.example/", title="P")],
+        folders=[FolderRecord(folder_id="f1", title="F", space_id="s1")],
+    )
+    legacy = ExportData(source="x", spaces=[space]).to_legacy_dict()["spaces"][0]
+
+    assert [t["url"] for t in legacy["bookmarks"]] == ["https://pin.example/"]
+    assert [f["title"] for f in legacy["bookmark_folders"]] == ["F"]
+
+
+def test_explicit_bookmarks_stay_separate_from_pinned_tabs():
+    from extractors.base import ExportData, FolderRecord, TabRecord
+
+    space = _make_space(
+        pinned_tabs=[TabRecord(url="https://pin.example/", title="P")],
+        folders=[],
+        bookmarks=[TabRecord(url="https://bm.example/", title="B")],
+        bookmark_folders=[FolderRecord(folder_id="bf", title="BF", space_id="s1")],
+    )
+    legacy = ExportData(source="x", spaces=[space]).to_legacy_dict()["spaces"][0]
+
+    assert [t["url"] for t in legacy["pinned_tabs"]] == ["https://pin.example/"]
+    assert [t["url"] for t in legacy["bookmarks"]] == ["https://bm.example/"]
+    assert [f["title"] for f in legacy["bookmark_folders"]] == ["BF"]

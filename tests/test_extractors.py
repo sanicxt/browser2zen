@@ -53,17 +53,28 @@ def test_chrome_extractor_detects_fixture(chrome_home):
 
 
 def test_chrome_extractor_extract_shape(chrome_home):
+    """Chromium pinned/open tabs come from the SNSS session store; the
+    Bookmarks tree feeds the separate ``bookmarks`` channel (so it lands
+    in Zen's bookmarks, not as a flood of sidebar pinned tabs)."""
     from extractors import ChromeExtractor
 
     data = ChromeExtractor().extract()
     assert data.source == "chrome"
     assert len(data.spaces) >= 1
     space = data.spaces[0]
-    urls = sorted(t.url for t in space.pinned_tabs)
-    assert "https://example.com/" in urls
-    assert "https://mozilla.org/" in urls
-    folder_titles = {f.title for f in space.folders}
+
+    # Real tab-strip state from the session fixture.
+    assert [t.url for t in space.pinned_tabs] == ["https://pinned.example/"]
+    assert [t.url for t in space.open_tabs] == ["https://open.example/"]
+
+    # Bookmarks ride the dedicated channel, not pinned_tabs.
+    bm_urls = sorted(t.url for t in (space.bookmarks or []))
+    assert "https://example.com/" in bm_urls
+    assert "https://mozilla.org/" in bm_urls
+    folder_titles = {f.title for f in (space.bookmark_folders or [])}
     assert "Test Folder" in folder_titles
+    # Bookmarks must NOT leak into the sidebar pinned tabs.
+    assert "https://example.com/" not in {t.url for t in space.pinned_tabs}
 
 
 def test_chrome_history_db_paths(chrome_home):
@@ -104,6 +115,12 @@ def test_chromium_quit_escalates_to_force_kill(monkeypatch):
             stderr = ""
 
         return _R()
+
+    # quit() escalation is macOS/Windows-only by design (see CLAUDE.md);
+    # on any other host it bails early. Pin the platform so the test
+    # exercises the macOS force-kill path regardless of the CI runner's OS
+    # (the Linux runner would otherwise hit the unsupported-platform branch).
+    monkeypatch.setattr(chromium.sys, "platform", "darwin")
 
     # Fake clock so the 6s graceful deadline elapses without real waiting.
     clock = {"t": 1000.0}

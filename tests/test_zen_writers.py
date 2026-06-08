@@ -49,6 +49,42 @@ def test_zen_bookmark_importer_writes_bookmarks(arc_home, zen_profile):
     assert "https://mozilla.org/" in urls
 
 
+def test_zen_bookmark_importer_uses_bookmark_channel(zen_profile):
+    """The bookmark importer must read the dedicated ``bookmarks`` channel,
+    not ``pinned_tabs`` — so Chromium's real pinned tabs don't get written
+    as bookmarks and its bookmarks aren't lost."""
+    from zen_bookmark_importer import ZenBookmarkImporter
+
+    legacy = {
+        "source": "chrome",
+        "total_spaces": 1,
+        "spaces": [{
+            "space_id": "s1", "space_name": "Default",
+            "icon": None, "color": None,
+            "total_pinned_tabs": 1, "total_open_tabs": 0, "total_folders": 0,
+            "pinned_tabs": [{"url": "https://session-pin.example/", "title": "Pin",
+                             "space_id": "s1", "space_name": "Default",
+                             "folder_path": [], "tab_id": "", "parent_id": "",
+                             "index": 0, "is_essential": False}],
+            "open_tabs": [], "folders": [],
+            "bookmarks": [{"url": "https://bookmarked.example/", "title": "BM",
+                           "space_id": "s1", "space_name": "Default",
+                           "folder_path": [], "tab_id": "", "parent_id": "",
+                           "index": 0, "is_essential": False}],
+            "bookmark_folders": [],
+        }],
+    }
+    assert ZenBookmarkImporter(zen_profile).import_bookmarks(legacy, dry_run=False)
+
+    conn = sqlite3.connect(zen_profile / "places.sqlite")
+    try:
+        urls = {row[0] for row in conn.execute("SELECT url FROM moz_places")}
+    finally:
+        conn.close()
+    assert "https://bookmarked.example/" in urls
+    assert "https://session-pin.example/" not in urls
+
+
 def test_zen_sessions_importer_writes_session(arc_home, zen_profile):
     """Verify the sessions importer produces a zen-sessions.jsonlz4 file
     (binary, mozLz4-compressed) without raising."""

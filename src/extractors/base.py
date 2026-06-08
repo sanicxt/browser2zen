@@ -95,6 +95,13 @@ class SpaceRecord:
     folders: list[FolderRecord] = field(default_factory=list)
     icon: str | None = None              # emoji, single-char string
     color: dict[str, float] | None = None  # {r,g,b} floats in 0..1
+    # Bookmark-backup channel, kept separate from ``pinned_tabs`` so a
+    # source's real tab-strip pinned tabs and its bookmarks no longer share
+    # a list. ``None`` means "this source doesn't distinguish them" — the
+    # legacy dict then falls these back to pinned_tabs/folders so
+    # bookmark-only sources (Arc/Firefox/Safari) behave exactly as before.
+    bookmarks: list[TabRecord] | None = None
+    bookmark_folders: list[FolderRecord] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -174,6 +181,34 @@ class ExportData:
                         "index": f.index,
                     }
                     for f in s.folders
+                ],
+                "bookmarks": [
+                    {
+                        "url": t.url,
+                        "title": t.title,
+                        "space_id": s.space_id,
+                        "space_name": s.space_name,
+                        "folder_path": list(t.folder_path),
+                        "tab_id": "",
+                        "parent_id": t.folder_id or "",
+                        "index": idx,
+                        "is_essential": t.is_essential,
+                    }
+                    for idx, t in enumerate(
+                        s.bookmarks if s.bookmarks is not None else s.pinned_tabs
+                    )
+                ],
+                "bookmark_folders": [
+                    {
+                        "folder_id": f.folder_id,
+                        "title": f.title,
+                        "parent_id": f.parent_id or "",
+                        "space_id": f.space_id or s.space_id,
+                        "children_ids": list(f.children_ids),
+                        "index": f.index,
+                    }
+                    for f in (s.bookmark_folders
+                              if s.bookmark_folders is not None else s.folders)
                 ],
             })
         return {

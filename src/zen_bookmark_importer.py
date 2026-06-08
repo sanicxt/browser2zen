@@ -155,15 +155,24 @@ class ZenBookmarkImporter:
             imported_count = 0
             skipped_count = 0
 
-            # Process each Arc space
+            # Process each space. Bookmarks ride their own channel; older
+            # callers (and bookmark-only sources) fall back to pinned_tabs/
+            # folders so behaviour is unchanged for them.
             for space_data in export_data.get('spaces', []):
-                if not space_data['pinned_tabs']:
-                    logger.info(f"⚪ Skipping {space_data['space_name']} - no pinned tabs")
+                bookmarks = space_data.get('bookmarks')
+                if bookmarks is None:
+                    bookmarks = space_data.get('pinned_tabs', [])
+                bookmark_folders = space_data.get('bookmark_folders')
+                if bookmark_folders is None:
+                    bookmark_folders = space_data.get('folders', [])
+
+                if not bookmarks:
+                    logger.info(f"⚪ Skipping {space_data['space_name']} - no bookmarks")
                     continue
 
-                logger.info(f"📁 Importing {space_data['space_name']} ({len(space_data['pinned_tabs'])} pinned tabs)")
+                logger.info(f"📁 Importing {space_data['space_name']} ({len(bookmarks)} bookmarks)")
 
-                # Create folder for this Arc space
+                # Create folder for this space
                 folder_id = self._create_arc_space_folder(
                     conn, space_data['space_name'], dry_run
                 )
@@ -174,21 +183,21 @@ class ZenBookmarkImporter:
 
                 # First, create folder structure
                 folder_map = {folder_id: folder_id}  # Root folder mapping
-                for folder_data in space_data.get('folders', []):
+                for folder_data in bookmark_folders:
                     folder_path = folder_data.get('title', 'Untitled Folder')
                     subfolder_id = self._create_subfolder(conn, folder_path, folder_id, dry_run)
                     if subfolder_id:
                         folder_map[folder_data['folder_id']] = subfolder_id
 
-                # Import pinned tabs to appropriate folders
-                for tab_data in space_data['pinned_tabs']:
+                # Import bookmarks to appropriate folders
+                for tab_data in bookmarks:
                     # Determine target folder based on folder_path
                     target_folder_id = folder_id  # Default to space root folder
 
                     folder_path = tab_data.get('folder_path', [])
                     if folder_path:
                         # Try to find matching folder by name
-                        for folder_data in space_data.get('folders', []):
+                        for folder_data in bookmark_folders:
                             if folder_data.get('title') in folder_path:
                                 target_folder_id = folder_map.get(folder_data['folder_id'], folder_id)
                                 break

@@ -210,10 +210,13 @@ class MigrationOrchestrator:
                 essential_count=essential,
                 color=color_rgb,
             ))
+            # Bookmarks ride their own channel; when a source doesn't set it
+            # they fall back to pinned_tabs (matches to_legacy_dict).
+            bookmarks = s.bookmarks if s.bookmarks is not None else (s.pinned_tabs or [])
             pinned_total += pinned_count
             open_total += open_count
             folder_total += folder_count
-            bookmark_total += pinned_count
+            bookmark_total += len(bookmarks)
             for t in (s.pinned_tabs or []):
                 if t.url:
                     all_urls.append(t.url)
