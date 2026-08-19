@@ -53,8 +53,8 @@ def test_check_environment_finds_zen_under_xdg_config_home(tmp_path, monkeypatch
     import sys
     from pathlib import Path
 
-    from extractors import ArcExtractor
     from app.orchestrator import MigrationOrchestrator
+    from extractors import ArcExtractor
 
     home = tmp_path / "home"
     home.mkdir()
@@ -87,8 +87,8 @@ def test_stale_zen_root_does_not_shadow_live_xdg_profile(tmp_path, monkeypatch):
     import sys
     from pathlib import Path
 
-    from extractors import ArcExtractor
     from app.orchestrator import MigrationOrchestrator
+    from extractors import ArcExtractor
 
     home = tmp_path / "home"
     home.mkdir()
