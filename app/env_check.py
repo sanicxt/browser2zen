@@ -111,13 +111,62 @@ def _arc_profiles(user_data: Path | None) -> list[str]:
 # ---------- Zen ----------
 
 
-def _zen_profiles_root() -> Path:
+def _xdg_config_home() -> Path:
+    """Resolve ``$XDG_CONFIG_HOME``, defaulting to ``~/.config``.
+
+    XDG-aware builds (common on Arch) keep browser data under
+    ``$XDG_CONFIG_HOME`` instead of the classic dotdir; honour the
+    variable when the user sets it.
+    """
+    env = os.environ.get("XDG_CONFIG_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".config"
+
+
+def _zen_profiles_roots() -> list[Path]:
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library/Application Support/zen/Profiles"
+        return [home / "Library/Application Support/zen/Profiles"]
     if os.name == "nt":
-        return home / "AppData/Roaming/zen/Profiles"
-    return home / ".zen"
+        return [home / "AppData/Roaming/zen/Profiles"]
+    return [
+        home / ".zen",
+        _xdg_config_home() / "zen",
+    ]
+
+
+def _zen_root_has_profile(root: Path) -> bool:
+    """A Zen root is live if any of its profile subdirectories carries a
+    ``places.sqlite`` (the heuristic ``list_zen_profiles`` uses). This
+    stops a stale ``profiles.ini`` from an old/uninstalled Zen from
+    shadowing a real profile under another candidate root."""
+    try:
+        return any(
+            entry.is_dir() and (entry / "places.sqlite").is_file()
+            for entry in root.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def _zen_profiles_root() -> Path:
+    """First candidate root that holds a live profile, else the first
+    candidate with a ``profiles.ini``, else the first candidate that
+    merely exists, else the canonical-but-missing one. ``~/.zen`` stays
+    first so classic installs are unchanged; the XDG ``~/.config/zen``
+    location covers Arch-style installs."""
+    candidates = _zen_profiles_roots()
+    for root in candidates:
+        if _zen_root_has_profile(root):
+            return root
+    for root in candidates:
+        if (root / "profiles.ini").is_file():
+            return root
+    for root in candidates:
+        if root.is_dir():
+            return root
+    return candidates[0] if candidates else None
 
 
 def list_zen_profiles() -> list[ZenProfile]:

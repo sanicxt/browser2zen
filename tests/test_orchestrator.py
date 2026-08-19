@@ -45,6 +45,75 @@ def test_check_environment_uses_source(arc_home, zen_profile):
     assert env.zen_installed is True
 
 
+def test_check_environment_finds_zen_under_xdg_config_home(tmp_path, monkeypatch):
+    """Zen on Arch-style XDG-config installs keeps its profiles under
+    ``~/.config/zen`` rather than ``~/.zen``; detection must find those
+    (same root cause as the Firefox/Brave "not found" report)."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    from extractors import ArcExtractor
+    from app.orchestrator import MigrationOrchestrator
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    # Copy the Zen fixture under the XDG layout. Linux Zen keeps profiles
+    # flat in the root (~/.zen/<profile>, ~/.config/zen/<profile>), not
+    # under a macOS-style ``Profiles/`` subdirectory.
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "zen"
+    src_profile = fixtures / "Profiles/test.default (release)"
+    dest_profile = home / ".config/zen/test.default (release)"
+    dest_profile.mkdir(parents=True)
+    for f in src_profile.iterdir():
+        if f.is_file():
+            shutil.copy2(f, dest_profile / f.name)
+
+    o = MigrationOrchestrator(source=ArcExtractor())
+    env = o.check_environment()
+    assert env.zen_installed is True
+    assert len(env.zen_profiles) >= 1
+    assert str(env.zen_profiles[0].path).startswith(str(home / ".config/zen"))
+
+
+def test_stale_zen_root_does_not_shadow_live_xdg_profile(tmp_path, monkeypatch):
+    """A leftover empty ``~/.zen/profiles.ini`` from an uninstalled Zen
+    must not shadow a live profile under ``~/.config/zen`` (regression:
+    root-picker used to prefer any root with a profiles.ini, making Zen
+    look \"not installed\" on Arch upgrades)."""
+    import sys
+    from pathlib import Path
+
+    from extractors import ArcExtractor
+    from app.orchestrator import MigrationOrchestrator
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    # Stale ~/.zen with a profiles.ini but no real profile data.
+    stale = home / ".zen"
+    stale.mkdir(parents=True)
+    (stale / "profiles.ini").write_text(
+        "[Profile0]\nPath=abc.default\n", encoding="utf-8"
+    )
+
+    # The live profile lives under the XDG layout.
+    dest_profile = home / ".config/zen/abc.default (release)"
+    dest_profile.mkdir(parents=True)
+    (dest_profile / "places.sqlite").write_bytes(b"\x00" * 64)
+
+    o = MigrationOrchestrator(source=ArcExtractor())
+    env = o.check_environment()
+    assert env.zen_installed is True
+    assert len(env.zen_profiles) >= 1
+    assert str(env.zen_profiles[0].path).startswith(str(home / ".config/zen"))
+
+
 def test_excluded_spaces_filter(chrome_home, zen_profile):
     """The orchestrator drops any space whose name is in
     excluded_spaces before lowering to the legacy dict."""

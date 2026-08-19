@@ -60,6 +60,19 @@ _ROOT_IDS = {
 }
 
 
+def _xdg_config_home() -> Path:
+    """Resolve ``$XDG_CONFIG_HOME``, defaulting to ``~/.config``.
+
+    XDG-aware builds (increasingly common on Arch and other rolling
+    distros) keep browser data under ``$XDG_CONFIG_HOME/<vendor>`` rather
+    than the classic dotdir. Honour the variable when the user sets it.
+    """
+    env = os.environ.get("XDG_CONFIG_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".config"
+
+
 def _firefox_profiles_roots() -> list[Path]:
     """Every plausible Firefox profiles root for the current OS.
 
@@ -71,8 +84,11 @@ def _firefox_profiles_roots() -> list[Path]:
       ``%LOCALAPPDATA%\\Packages\\Mozilla.Firefox_<id>\\LocalCache\\Roaming\\Mozilla\\Firefox``.
       The standard path is empty for those installs, which is why both
       browser2zen and Zen's own importer otherwise miss a Store Firefox.
-    - Linux: a classic distro/apt install uses ``~/.mozilla/firefox``,
-      the Snap build (Ubuntu 22.04+ default) lives under
+    - Linux: a classic distro/apt install uses ``~/.mozilla/firefox``;
+      XDG-aware builds (Arch's ``firefox``, some others) put the
+      profiles root under ``$XDG_CONFIG_HOME/mozilla/firefox``
+      (``~/.config/mozilla/firefox`` by default); the Snap build
+      (Ubuntu 22.04+ default) lives under
       ``~/snap/firefox/common/.mozilla/firefox`` and the Flatpak build
       under ``~/.var/app/org.mozilla.firefox/.mozilla/firefox``.
 
@@ -97,6 +113,7 @@ def _firefox_profiles_roots() -> list[Path]:
         return roots
     return [
         home / ".mozilla/firefox",
+        _xdg_config_home() / "mozilla/firefox",
         home / "snap/firefox/common/.mozilla/firefox",
         home / ".var/app/org.mozilla.firefox/.mozilla/firefox",
     ]

@@ -41,18 +41,29 @@ from .base import (
 logger = logging.getLogger(__name__)
 
 
-def _first_existing(paths) -> Path | None:
-    for p in paths:
-        if p and p.exists():
-            return p
-    return None
-
-
 # Synthetic-id namespaces. Folder/space ids in Arc are stable UUIDs; we
 # need our synthetic Chromium ids to be stable across runs too so the
 # Zen-side importers (which dedupe by id) don't double-create things.
 _NS_FOLDER = uuid.UUID("4e7b8d6a-9c33-4e2b-9fa3-1bd1d1ea2c41")
 _NS_SPACE = uuid.UUID("0ad3a9d9-95c0-4de1-87c1-2c41a9a3b1aa")
+
+
+def _root_has_profile(root: Path) -> bool:
+    """A Chromium User Data root is live if it carries a ``Local State``
+    file (created on first launch) or any profile subdirectory with a
+    ``Bookmarks`` / ``History`` file. An empty leftover install dir
+    (e.g. an abandoned ``Brave-Browser`` next to a used ``Brave-Origin``)
+    must not shadow the real one."""
+    if (root / "Local State").is_file():
+        return True
+    try:
+        return any(
+            entry.is_dir()
+            and ((entry / "Bookmarks").is_file() or (entry / "History").is_file())
+            for entry in root.iterdir()
+        )
+    except OSError:
+        return False
 
 
 class ChromiumExtractor(BrowserExtractor):
@@ -89,7 +100,14 @@ class ChromiumExtractor(BrowserExtractor):
             candidates = self.user_data_dirs_windows
         else:
             candidates = self.user_data_dirs_linux
-        return _first_existing(home / rel for rel in candidates)
+        existing = [home / rel for rel in candidates if (home / rel).is_dir()]
+        # Prefer the first root that actually holds profile data, so a
+        # leftover empty install dir can't shadow the one the user really
+        # uses. Fall back to the first existing root, then to None.
+        for root in existing:
+            if _root_has_profile(root):
+                return root
+        return existing[0] if existing else None
 
     def is_installed(self) -> bool:
         root = self._user_data_dir()

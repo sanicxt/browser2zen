@@ -177,6 +177,7 @@ def test_firefox_extractor_skips_disabled_root(firefox_home):
 @pytest.mark.parametrize(
     "root_rel",
     [
+        ".config/mozilla/firefox",                              # Arch XDG-config layout
         "snap/firefox/common/.mozilla/firefox",                 # Ubuntu Snap
         ".var/app/org.mozilla.firefox/.mozilla/firefox",        # Flatpak
     ],
@@ -184,9 +185,10 @@ def test_firefox_extractor_skips_disabled_root(firefox_home):
 def test_firefox_extractor_detects_linux_packaged_install(
     tmp_path, monkeypatch, root_rel
 ):
-    """Snap/Flatpak Firefox keeps its profiles outside ``~/.mozilla``;
-    detection must find those too (regression for the Reddit report that
-    Firefox wasn't detected)."""
+    """Snap/Flatpak/XDG-config Firefox keeps its profiles outside
+    ``~/.mozilla``; detection must find those too (regression for the
+    Reddit report that Firefox wasn't detected, and the Arch report where
+    profiles live under ``~/.config/mozilla/firefox``)."""
     import shutil
     import sys
     from pathlib import Path
@@ -212,6 +214,36 @@ def test_firefox_extractor_detects_linux_packaged_install(
     data = ext.extract()
     assert data.source == "firefox"
     assert len(data.spaces) == 1
+
+
+def test_firefox_extractor_honours_xdg_config_home(tmp_path, monkeypatch):
+    """When the user sets ``XDG_CONFIG_HOME`` explicitly, Firefox's
+    profiles root must follow it (the profiles root is
+    ``$XDG_CONFIG_HOME/mozilla/firefox`` on XDG-aware builds)."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    from extractors import FirefoxExtractor
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "firefox"
+    home = tmp_path / "home"
+    home.mkdir()
+    xdg_config = tmp_path / "xdg"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(xdg_config))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    root_rel = "mozilla/firefox"
+    for src in fixtures.rglob("*"):
+        if src.is_file():
+            dest = xdg_config / root_rel / src.relative_to(fixtures)
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dest)
+
+    ext = FirefoxExtractor()
+    assert ext.is_installed() is True
+    assert len(ext.profile_paths()) == 1
 
 
 def test_firefox_extractor_detects_windows_store_msix(tmp_path, monkeypatch):
@@ -282,6 +314,51 @@ def test_edge_extractor_registered():
 def test_brave_extractor_registered():
     from extractors import BraveExtractor, by_name
     assert by_name("brave") is BraveExtractor
+
+
+def test_brave_extractor_detects_brave_origin(tmp_path, monkeypatch):
+    """Brave Origin (official ``brave-origin-bin`` AUR package) keeps its
+    User Data under ``~/.config/BraveSoftware/Brave-Origin`` instead of
+    ``Brave-Browser``. Detection must find it, even when a leftover empty
+    ``Brave-Browser`` directory is also present (regression for the Arch
+    report where Brave showed as "not found")."""
+    import json
+    import sys
+    from pathlib import Path
+
+    from extractors import BraveExtractor
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    origin = home / ".config/BraveSoftware/Brave-Origin"
+    (origin / "Default").mkdir(parents=True)
+    (origin / "Local State").write_text('{"profile": {}}', encoding="utf-8")
+    (origin / "Default" / "Bookmarks").write_text(json.dumps({
+        "roots": {
+            "bookmark_bar": {
+                "children": [
+                    {"type": "url", "name": "Example", "url": "https://example.com/"}
+                ]
+            },
+            "other": {"children": []},
+            "synced": {"children": []},
+        },
+    }), encoding="utf-8")
+
+    # A leftover, never-launched Brave-Browser install must NOT shadow it.
+    (home / ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts").mkdir(parents=True)
+
+    ext = BraveExtractor()
+    assert ext.is_installed() is True
+    roots = [p.name for p in ext.profile_paths()]
+    assert roots == ["Default"]
+    data = ext.extract()
+    assert data.source == "brave"
+    urls = sorted(t.url for t in (data.spaces[0].bookmarks or []))
+    assert urls == ["https://example.com/"]
 
 
 def test_unknown_source_raises():
