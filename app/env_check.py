@@ -133,6 +133,9 @@ def _zen_profiles_roots() -> list[Path]:
     return [
         home / ".zen",
         _xdg_config_home() / "zen",
+        # Flatpak (app.zen_browser.zen) keeps its data under the sandbox
+        # home, not the host ~/.zen or ~/.config/zen.
+        home / ".var/app/app.zen_browser.zen/.zen",
     ]
 
 
@@ -155,7 +158,8 @@ def _zen_profiles_root() -> Path:
     candidate with a ``profiles.ini``, else the first candidate that
     merely exists, else the canonical-but-missing one. ``~/.zen`` stays
     first so classic installs are unchanged; the XDG ``~/.config/zen``
-    location covers Arch-style installs."""
+    location covers Arch-style installs; the Flatpak sandbox home covers
+    ``app.zen_browser.zen`` installs."""
     candidates = _zen_profiles_roots()
     for root in candidates:
         if _zen_root_has_profile(root):

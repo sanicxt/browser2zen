@@ -79,6 +79,39 @@ def test_check_environment_finds_zen_under_xdg_config_home(tmp_path, monkeypatch
     assert str(env.zen_profiles[0].path).startswith(str(home / ".config/zen"))
 
 
+def test_check_environment_finds_zen_under_flatpak(tmp_path, monkeypatch):
+    """Zen Flatpak (app.zen_browser.zen) keeps its profiles under the
+    sandbox home ``~/.var/app/app.zen_browser.zen/.zen``; detection must
+    find those (issue #5: Flatpak version not detected on Linux)."""
+    import shutil
+    import sys
+    from pathlib import Path
+
+    from app.orchestrator import MigrationOrchestrator
+    from extractors import ArcExtractor
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    fixtures = Path(__file__).resolve().parent / "fixtures" / "zen"
+    src_profile = fixtures / "Profiles/test.default (release)"
+    dest_profile = home / ".var/app/app.zen_browser.zen/.zen/test.default (release)"
+    dest_profile.mkdir(parents=True)
+    for f in src_profile.iterdir():
+        if f.is_file():
+            shutil.copy2(f, dest_profile / f.name)
+
+    o = MigrationOrchestrator(source=ArcExtractor())
+    env = o.check_environment()
+    assert env.zen_installed is True
+    assert len(env.zen_profiles) >= 1
+    assert str(env.zen_profiles[0].path).startswith(
+        str(home / ".var/app/app.zen_browser.zen/.zen")
+    )
+
+
 def test_stale_zen_root_does_not_shadow_live_xdg_profile(tmp_path, monkeypatch):
     """A leftover empty ``~/.zen/profiles.ini`` from an uninstalled Zen
     must not shadow a live profile under ``~/.config/zen`` (regression:
