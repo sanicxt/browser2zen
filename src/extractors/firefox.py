@@ -41,6 +41,7 @@ from .base import (
     FolderRecord,
     SpaceRecord,
     TabRecord,
+    xdg_config_home,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,19 +59,6 @@ _ROOT_IDS = {
     5: "Other Bookmarks",
     6: "Mobile Bookmarks",
 }
-
-
-def _xdg_config_home() -> Path:
-    """Resolve ``$XDG_CONFIG_HOME``, defaulting to ``~/.config``.
-
-    XDG-aware builds (increasingly common on Arch and other rolling
-    distros) keep browser data under ``$XDG_CONFIG_HOME/<vendor>`` rather
-    than the classic dotdir. Honour the variable when the user sets it.
-    """
-    env = os.environ.get("XDG_CONFIG_HOME")
-    if env:
-        return Path(env).expanduser()
-    return Path.home() / ".config"
 
 
 def _firefox_profiles_roots() -> list[Path]:
@@ -113,7 +101,7 @@ def _firefox_profiles_roots() -> list[Path]:
         return roots
     return [
         home / ".mozilla/firefox",
-        _xdg_config_home() / "mozilla/firefox",
+        xdg_config_home() / "mozilla/firefox",
         home / "snap/firefox/common/.mozilla/firefox",
         home / ".var/app/org.mozilla.firefox/.mozilla/firefox",
     ]

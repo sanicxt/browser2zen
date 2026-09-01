@@ -36,6 +36,7 @@ from .base import (
     FolderRecord,
     SpaceRecord,
     TabRecord,
+    xdg_config_home,
 )
 
 logger = logging.getLogger(__name__)
@@ -49,17 +50,20 @@ _NS_SPACE = uuid.UUID("0ad3a9d9-95c0-4de1-87c1-2c41a9a3b1aa")
 
 
 def _root_has_profile(root: Path) -> bool:
-    """A Chromium User Data root is live if it carries a ``Local State``
-    file (created on first launch) or any profile subdirectory with a
-    ``Bookmarks`` / ``History`` file. An empty leftover install dir
-    (e.g. an abandoned ``Brave-Browser`` next to a used ``Brave-Origin``)
-    must not shadow the real one."""
-    if (root / "Local State").is_file():
-        return True
+    """A Chromium User Data root is live if it holds a profile dir with a
+    ``Bookmarks`` file. An empty leftover install dir (e.g. an abandoned
+    ``Brave-Browser`` next to a used ``Brave-Origin``) must not shadow the
+    real one.
+
+    This predicate has to stay in sync with ``is_installed`` — pick a root
+    that ``is_installed`` then rejects and the browser reports "not found"
+    anyway. In particular ``Local State`` alone is NOT enough: an install
+    that was launched once and then abandoned has one, and would shadow
+    the root the user actually uses.
+    """
     try:
         return any(
-            entry.is_dir()
-            and ((entry / "Bookmarks").is_file() or (entry / "History").is_file())
+            entry.is_dir() and (entry / "Bookmarks").is_file()
             for entry in root.iterdir()
         )
     except OSError:
@@ -92,15 +96,36 @@ class ChromiumExtractor(BrowserExtractor):
 
     # ---------- detection ----------
 
+    def _linux_user_data_paths(self, home: Path) -> list[Path]:
+        """Linux candidates, resolved against ``$XDG_CONFIG_HOME``.
+
+        Chromium reads its User Data root from ``$XDG_CONFIG_HOME``
+        (default ``~/.config``), so a ``.config/...`` candidate has to
+        follow the variable when the user sets it. Snap and Flatpak
+        candidates carry their own container prefix and stay relative to
+        ``$HOME``. The XDG location comes first because that is the one
+        Chromium itself would use.
+        """
+        xdg = xdg_config_home()
+        out: list[Path] = []
+        for rel in self.user_data_dirs_linux:
+            if rel.startswith(".config/"):
+                out.append(xdg / rel[len(".config/"):])
+            out.append(home / rel)
+        # Dedupe, preserving order. ``xdg`` equals ``~/.config`` whenever
+        # the variable is unset, which is the common case.
+        seen: set[Path] = set()
+        return [p for p in out if not (p in seen or seen.add(p))]
+
     def _user_data_dir(self) -> Path | None:
         home = Path.home()
         if sys.platform == "darwin":
-            candidates = self.user_data_dirs_macos
+            paths = [home / rel for rel in self.user_data_dirs_macos]
         elif os.name == "nt":
-            candidates = self.user_data_dirs_windows
+            paths = [home / rel for rel in self.user_data_dirs_windows]
         else:
-            candidates = self.user_data_dirs_linux
-        existing = [home / rel for rel in candidates if (home / rel).is_dir()]
+            paths = self._linux_user_data_paths(home)
+        existing = [p for p in paths if p.is_dir()]
         # Prefer the first root that actually holds profile data, so a
         # leftover empty install dir can't shadow the one the user really
         # uses. Fall back to the first existing root, then to None.
