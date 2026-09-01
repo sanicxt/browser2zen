@@ -147,6 +147,66 @@ def test_stale_zen_root_does_not_shadow_live_xdg_profile(tmp_path, monkeypatch):
     assert str(env.zen_profiles[0].path).startswith(str(home / ".config/zen"))
 
 
+def test_zen_lists_profiles_from_every_root(tmp_path, monkeypatch):
+    """A native Zen and a Flatpak Zen can be installed side by side. Both
+    profiles must reach the picker: choosing a single root hid the Flatpak
+    one whenever ``~/.zen`` also held a live profile, which is exactly the
+    Flatpak-first case in issue #5."""
+    import sys
+    from pathlib import Path
+
+    from app.orchestrator import MigrationOrchestrator
+    from extractors import ArcExtractor
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    native = home / ".zen/aaa.default (release)"
+    flatpak = home / ".var/app/app.zen_browser.zen/.zen/bbb.default (release)"
+    for p in (native, flatpak):
+        p.mkdir(parents=True)
+        (p / "places.sqlite").write_bytes(b"\x00" * 64)
+
+    o = MigrationOrchestrator(source=ArcExtractor())
+    env = o.check_environment()
+    assert env.zen_installed is True
+    paths = {str(p.path) for p in env.zen_profiles}
+    assert paths == {str(native), str(flatpak)}
+    # The install label disambiguates two identically-named profiles.
+    installs = {str(p.path): p.install for p in env.zen_profiles}
+    assert installs[str(native)] == ""
+    assert installs[str(flatpak)] == "Flatpak"
+
+
+def test_zen_classic_root_stays_first_when_both_are_live(tmp_path, monkeypatch):
+    """With several live roots the classic ``~/.zen`` profile stays the
+    default selection, so a single-install machine keeps its old target."""
+    import sys
+    from pathlib import Path
+
+    from app.orchestrator import MigrationOrchestrator
+    from extractors import ArcExtractor
+
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    # Same profile name under both roots — only the root differs.
+    native = home / ".zen/abc.default (release)"
+    xdg = home / ".config/zen/abc.default (release)"
+    for p in (native, xdg):
+        p.mkdir(parents=True)
+        (p / "places.sqlite").write_bytes(b"\x00" * 64)
+
+    o = MigrationOrchestrator(source=ArcExtractor())
+    env = o.check_environment()
+    assert len(env.zen_profiles) == 2
+    assert str(env.zen_profiles[0].path) == str(native)
+
+
 def test_excluded_spaces_filter(chrome_home, zen_profile):
     """The orchestrator drops any space whose name is in
     excluded_spaces before lowering to the legacy dict."""
