@@ -152,17 +152,17 @@ class ArcExtractor(BrowserExtractor):
     def _user_data_dir(self) -> Path | None:
         return _first_existing(_arc_user_data_paths())
 
-    def history_db_paths(self) -> list[Path]:
+    def history_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         root = self._user_data_dir()
         return sorted(p for p in (root.glob("*/History") if root else [])
                       if p.is_file())
 
-    def favicon_db_paths(self) -> list[Path]:
+    def favicon_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         root = self._user_data_dir()
         return sorted(p for p in (root.glob("*/Favicons") if root else [])
                       if p.is_file())
 
-    def cookie_db_paths(self) -> list[Path]:
+    def cookie_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         root = self._user_data_dir()
         if root is None:
             return []

@@ -216,17 +216,26 @@ class ChromiumExtractor(BrowserExtractor):
 
     # ---------- chromium-style data paths ----------
 
-    def history_db_paths(self) -> list[Path]:
-        return [p / "History" for p in self.profile_paths()
+    # Maps space_id → the profile dir that produced it, populated by
+    # ``extract()``. The orchestrator uses this to scope per-profile
+    # SQLite reads (history / favicons / cookies) to the spaces the user
+    # actually included on the Preview screen.
+    _space_profile_dirs: dict[str, Path] = {}
+
+    def history_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
+        profiles = self._profiles_for(space_ids) if space_ids else self.profile_paths()
+        return [p / "History" for p in profiles
                 if (p / "History").is_file()]
 
-    def favicon_db_paths(self) -> list[Path]:
-        return [p / "Favicons" for p in self.profile_paths()
+    def favicon_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
+        profiles = self._profiles_for(space_ids) if space_ids else self.profile_paths()
+        return [p / "Favicons" for p in profiles
                 if (p / "Favicons").is_file()]
 
-    def cookie_db_paths(self) -> list[Path]:
+    def cookie_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
+        profiles = self._profiles_for(space_ids) if space_ids else self.profile_paths()
         out: list[Path] = []
-        for prof in self.profile_paths():
+        for prof in profiles:
             # New Chromium nests cookies under Network/; older builds
             # keep them at the profile root.
             for cand in (prof / "Network" / "Cookies", prof / "Cookies"):
@@ -234,6 +243,15 @@ class ChromiumExtractor(BrowserExtractor):
                     out.append(cand)
                     break
         return out
+
+    def _profiles_for(self, space_ids: list[str]) -> list[Path]:
+        """Profile dirs backing the given space ids. Falls back to every
+        profile when the mapping is unavailable (e.g. ``extract()`` never
+        ran, as in pure path-lookup contexts)."""
+        if not self._space_profile_dirs:
+            return self.profile_paths()
+        wanted = set(space_ids)
+        return [d for sid, d in self._space_profile_dirs.items() if sid in wanted]
 
     def local_state_paths(self) -> list[Path]:
         root = self._user_data_dir()
@@ -455,6 +473,7 @@ class ChromiumExtractor(BrowserExtractor):
             )
 
         spaces: list[SpaceRecord] = []
+        self._space_profile_dirs.clear()
         for profile in profiles:
             space_id = self._stable_space_id(profile.name)
             # Bookmarks → the dedicated bookmark channel (Zen bookmarks).
@@ -465,6 +484,7 @@ class ChromiumExtractor(BrowserExtractor):
             pinned_tabs, open_tabs = self._read_session_tabs(profile)
             if not (bookmarks or bookmark_folders or pinned_tabs or open_tabs):
                 continue
+            self._space_profile_dirs[space_id] = profile
             spaces.append(SpaceRecord(
                 space_id=space_id,
                 space_name=self._profile_display_name(profile),

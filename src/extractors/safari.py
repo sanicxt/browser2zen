@@ -280,11 +280,11 @@ class SafariExtractor(BrowserExtractor):
     # binarycookies parser). The orchestrator dispatches by source.name
     # so the Chromium importers don't get called with these paths.
 
-    def history_db_paths(self) -> list[Path]:
+    def history_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         history = Path.home() / "Library/Safari/History.db"
         return [history] if history.is_file() else []
 
-    def cookie_db_paths(self) -> list[Path]:
+    def cookie_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         # Sandboxed Safari (modern macOS) keeps cookies inside its
         # container. We try both locations and return the first that
         # exists.

@@ -389,11 +389,11 @@ class FirefoxExtractor(BrowserExtractor):
     # ``src/firefox_cookies_importer.py``. We expose the source paths
     # here and skip the Chromium-style cookie_master_key entirely.
 
-    def history_db_paths(self) -> list[Path]:
+    def history_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         return [p / "places.sqlite" for p in self.profile_paths()
                 if (p / "places.sqlite").is_file()]
 
-    def cookie_db_paths(self) -> list[Path]:
+    def cookie_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         return [p / "cookies.sqlite" for p in self.profile_paths()
                 if (p / "cookies.sqlite").is_file()]
 

@@ -120,10 +120,93 @@ def _zen_profiles_root() -> Path:
     return home / ".zen"
 
 
+def _zen_root() -> Path:
+    """The zen data root (parent of Profiles/ on macOS/Windows)."""
+    home = Path.home()
+    if sys.platform == "darwin":
+        return home / "Library/Application Support/zen"
+    if os.name == "nt":
+        return home / "AppData/Roaming/zen"
+    return home / ".zen"
+
+
+def _profile_names_from_ini(root: Path) -> dict[str, str]:
+    """Parse ``profiles.ini`` into {relative profile dir: display name}.
+
+    Zen inherits Firefox's profiles.ini, so ``Name=`` is the user-visible
+    name for classic profiles. Returns {} when the file is missing or
+    unreadable.
+    """
+    ini = root / "profiles.ini"
+    if not ini.is_file():
+        return {}
+    names: dict[str, str] = {}
+    section: dict[str, str] = {}
+    try:
+        for raw in ini.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
+            if line.startswith("[") and line.endswith("]"):
+                section = {}
+                continue
+            if "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            section[key.strip().lower()] = value.strip()
+            # ``Name=`` may precede ``Path=`` within a section, so pair
+            # them on whichever key arrives second.
+            if "name" in section and "path" in section:
+                names[section["path"]] = section["name"]
+    except OSError:
+        return {}
+    return names
+
+
+def _profile_names_from_profile_groups(root: Path) -> dict[str, str]:
+    """Read display names from Zen's unified-profiles store.
+
+    Zen 1.18+ (Firefox 138 unified toolkit profile UX) keeps per-profile
+    display names in ``Profile Groups/<StoreID>.sqlite`` (table
+    ``Profiles``: path relative to the zen root, ``name``, avatar…).
+    These are the names shown in Zen's profile menubar; they never appear
+    in ``profiles.ini``/``about:profiles``. Returns {} when absent.
+    """
+    groups_dir = root / "Profile Groups"
+    if not groups_dir.is_dir():
+        return {}
+    names: dict[str, str] = {}
+    for db in sorted(groups_dir.glob("*.sqlite")):
+        if db.name.endswith(("-wal", "-shm")):
+            continue
+        try:
+            import sqlite3
+            # Read-only URI open: never touch the live DB (Zen may hold it).
+            uri = f"file:{db}?mode=ro&immutable=0"
+            conn = sqlite3.connect(uri, timeout=1, uri=True)
+            try:
+                rows = conn.execute(
+                    "SELECT path, name FROM Profiles WHERE name IS NOT NULL"
+                ).fetchall()
+            finally:
+                conn.close()
+            for path_value, name_value in rows:
+                if isinstance(path_value, str) and isinstance(name_value, str):
+                    names[path_value] = name_value
+        except Exception:
+            # Locked, schema drift, or not a Profiles DB — fall through.
+            continue
+    return names
+
+
 def list_zen_profiles() -> list[ZenProfile]:
     root = _zen_profiles_root()
     if not root.is_dir():
         return []
+    # Display names, best-effort: Zen's unified-profiles DB (the menubar
+    # names, modern Zen) first — profiles.ini may carry stale legacy
+    # names there. profiles.ini next for classic installs; directory-name
+    # parsing is the last resort.
+    ini_names = _profile_names_from_ini(_zen_root())
+    group_names = _profile_names_from_profile_groups(_zen_root())
     result: list[ZenProfile] = []
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
@@ -131,7 +214,10 @@ def list_zen_profiles() -> list[ZenProfile]:
         # Heuristic: a real profile has at least places.sqlite
         if not (entry / "places.sqlite").is_file():
             continue
-        name = entry.name.split(".", 1)[1] if "." in entry.name else entry.name
+        rel = entry.relative_to(_zen_root()).as_posix()
+        name = group_names.get(rel) or ini_names.get(rel)
+        if not name:
+            name = entry.name.split(".", 1)[1] if "." in entry.name else entry.name
         result.append(
             ZenProfile(
                 name=name,

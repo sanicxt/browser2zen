@@ -91,6 +91,34 @@ def test_chrome_cookie_db_paths(chrome_home):
     assert any(p.name == "Cookies" for p in paths)
 
 
+def test_scoped_db_paths_exclude_dropped_spaces(chrome_home):
+    """Regression: unchecking a space on the Preview screen must also
+    exclude that profile's cookies/history/favicons. The orchestrator
+    scopes path lookups with the included space ids; a space id that maps
+    to a different profile must not contribute paths."""
+    from extractors import ChromeExtractor
+
+    ext = ChromeExtractor()
+    export = ext.extract()
+    assert export.spaces, "fixture produced no spaces"
+
+    included = [s.space_id for s in export.spaces]
+    all_cookie_paths = ext.cookie_db_paths()
+    scoped = ext.cookie_db_paths(included)
+
+    # Every scoped path must belong to a profile dir backing an included space.
+    allowed = {str(ext._space_profile_dirs[sid]) for sid in included}
+    assert scoped, "scoped lookup returned nothing for included spaces"
+    for p in scoped:
+        assert str(p.parent) in allowed
+    # Unknown space ids contribute nothing.
+    assert ext.cookie_db_paths(["no-such-space-id"]) == []
+    assert ext.history_db_paths(["no-such-space-id"]) == []
+    assert ext.favicon_db_paths(["no-such-space-id"]) == []
+    # Unscoped lookups still return the full set (back-compat).
+    assert all(p.name == "History" for p in ext.history_db_paths())
+
+
 def test_chromium_quit_escalates_to_force_kill(monkeypatch):
     """When a graceful quit is ignored, quit() must escalate to a forced
     kill rather than just timing out (regression: Brave wouldn't quit)."""

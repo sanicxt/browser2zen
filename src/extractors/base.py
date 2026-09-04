@@ -270,18 +270,21 @@ class BrowserExtractor(ABC):
 
     # ---- chromium-style data paths used by generic readers ----
 
-    def history_db_paths(self) -> list[Path]:
+    def history_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         """SQLite ``History`` files (Chromium-format). Empty for Firefox/Safari
-        (those use a different reader)."""
+        (those use a different reader). ``space_ids`` optionally scopes the
+        result to the profiles that produced those spaces; extractors that
+        don't track the mapping ignore it."""
         return []
 
-    def favicon_db_paths(self) -> list[Path]:
+    def favicon_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         """SQLite ``Favicons`` files (Chromium-format)."""
         return []
 
-    def cookie_db_paths(self) -> list[Path]:
+    def cookie_db_paths(self, space_ids: list[str] | None = None) -> list[Path]:
         """Cookie SQLite files. Schema differs per browser; the cookie
-        importer dispatches based on extractor type."""
+        importer dispatches based on extractor type. ``space_ids``
+        optionally scopes the result to those spaces' profiles."""
         return []
 
     def local_state_paths(self) -> list[Path]:

@@ -374,6 +374,12 @@ class MigrationOrchestrator:
         # source-agnostic.
         export_data = export.to_legacy_dict()
 
+        # Included-space ids scope the per-profile SQLite reads (history /
+        # favicons / cookies) to the profiles that produced the spaces the
+        # user kept. Without this, an unchecked profile's cookies and
+        # history would still be imported.
+        included_space_ids = [s.space_id for s in export.spaces]
+
         space_count = len(export_data.get("spaces", []))
         pinned_count = sum(len(sp.get("pinned_tabs") or []) for sp in export_data.get("spaces", []))
         self._done_step("extract", summary={
@@ -445,7 +451,7 @@ class MigrationOrchestrator:
             try:
                 fav = FaviconImporter(
                     zen_profile, dry_run=False,
-                    favicon_dbs=self.source.favicon_db_paths(),
+                    favicon_dbs=self.source.favicon_db_paths(included_space_ids),
                 )
                 urls = list(dict.fromkeys(_iter_pinned_urls(export_data)))
                 db_summary = fav.import_favicons(urls)
@@ -472,18 +478,18 @@ class MigrationOrchestrator:
                     from firefox_history_importer import FirefoxHistoryImporter
                     h = FirefoxHistoryImporter(
                         zen_profile, dry_run=False,
-                        history_dbs=self.source.history_db_paths(),
+                        history_dbs=self.source.history_db_paths(included_space_ids),
                     )
                 elif self.source.name == "safari":
                     from safari_history_importer import SafariHistoryImporter
                     h = SafariHistoryImporter(
                         zen_profile, dry_run=False,
-                        history_dbs=self.source.history_db_paths(),
+                        history_dbs=self.source.history_db_paths(included_space_ids),
                     )
                 else:
                     h = HistoryImporter(
                         zen_profile, dry_run=False,
-                        history_dbs=self.source.history_db_paths(),
+                        history_dbs=self.source.history_db_paths(included_space_ids),
                     )
                 summary = h.import_history()
                 self._done_step("history", summary=summary)
@@ -501,20 +507,20 @@ class MigrationOrchestrator:
                     c = FirefoxCookiesImporter(
                         zen_profile, dry_run=False,
                         container_ids=container_ids,
-                        cookie_dbs=self.source.cookie_db_paths(),
+                        cookie_dbs=self.source.cookie_db_paths(included_space_ids),
                     )
                 elif self.source.name == "safari":
                     from safari_cookies_importer import SafariCookiesImporter
                     c = SafariCookiesImporter(
                         zen_profile, dry_run=False,
                         container_ids=container_ids,
-                        cookie_dbs=self.source.cookie_db_paths(),
+                        cookie_dbs=self.source.cookie_db_paths(included_space_ids),
                     )
                 else:
                     c = CookiesImporter(
                         zen_profile, dry_run=False,
                         container_ids=container_ids,
-                        cookie_dbs=self.source.cookie_db_paths(),
+                        cookie_dbs=self.source.cookie_db_paths(included_space_ids),
                         keychain_service=getattr(self.source, "keychain_service", "Arc Safe Storage"),
                         keychain_account=getattr(self.source, "keychain_account", "Arc"),
                         local_state_paths=self.source.local_state_paths(),
