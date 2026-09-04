@@ -88,6 +88,7 @@ class ChromiumExtractor(BrowserExtractor):
     # Cookie key ---------------------------------------------------------
     keychain_service: str = ""        # e.g. "Chrome Safe Storage"
     keychain_account: str = ""        # e.g. "Chrome"
+    linux_app_names: tuple[str, ...] = ()  # for Secret Service / libsecret
 
     # Process detection / quit -------------------------------------------
     macos_app_name: str = ""          # for ``tell application "X" to quit``
@@ -331,9 +332,52 @@ class ChromiumExtractor(BrowserExtractor):
             except _DpapiError as exc:
                 raise BrowserExtractorError(exc.code, str(exc)) from exc
 
+        if sys.platform.startswith("linux"):
+            from chromium_cookies_importer import (
+                _derive_aes_key_linux,
+                _read_linux_password,
+            )
+            candidates: list[str] = list(self.linux_app_names)
+            if self.keychain_account:
+                candidates.append(self.keychain_account.lower())
+                candidates.append(self.keychain_account)
+            if self.name:
+                candidates.append(self.name.lower())
+            seen: set[str] = set()
+            unique_candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+
+            password = _read_linux_password(unique_candidates)
+            if password is not None:
+                return _derive_aes_key_linux(password)
+
+            has_v11 = False
+            for db in self.cookie_db_paths():
+                try:
+                    import sqlite3
+                    conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+                    try:
+                        row = conn.execute(
+                            "SELECT 1 FROM cookies WHERE encrypted_value LIKE 'v11%' LIMIT 1"
+                        ).fetchone()
+                        if row:
+                            has_v11 = True
+                            break
+                    finally:
+                        conn.close()
+                except Exception:
+                    pass
+
+            if has_v11:
+                raise BrowserExtractorError(
+                    "secret_service_missing",
+                    f"Linux Secret Service safe storage key for {self.display_name or self.name!r} was not found.",
+                )
+
+            return _derive_aes_key_linux("peanuts")
+
         raise BrowserExtractorError(
             "unsupported_platform",
-            "Cookie decryption only supports macOS and Windows.",
+            "Cookie decryption only supports macOS, Windows, and Linux.",
         )
 
     # ---------- profile labels ----------

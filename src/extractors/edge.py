@@ -23,6 +23,7 @@ class EdgeExtractor(ChromiumExtractor):
 
     keychain_service = "Microsoft Edge Safe Storage"
     keychain_account = "Microsoft Edge"
+    linux_app_names = ("microsoft-edge", "edge", "msedge", "Microsoft Edge")
 
     macos_app_name = "Microsoft Edge"
     macos_process_paths = ("Microsoft Edge.app/Contents/MacOS/Microsoft Edge",)

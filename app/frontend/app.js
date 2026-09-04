@@ -1142,10 +1142,31 @@ function shortenPath(p) {
 
 // ---- bootstrap ------------------------------------------------------------
 
+function applyTheme(theme) {
+  if (theme === "dark" || theme === "light") {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+window.__setTheme = applyTheme;
+
 async function setPlatformAttribute() {
   const api = Bridge();
   if (!api) return;
   try {
+    if (typeof api.system_info === "function") {
+      const info = await api.system_info();
+      if (info) {
+        if (info.platform) document.body.dataset.platform = info.platform;
+        const pNode = $("footer-platform");
+        if (pNode && info.platformName && info.arch) {
+          pNode.textContent = `${info.platformName} · ${info.arch}`;
+        }
+        if (info.theme) {
+          applyTheme(info.theme);
+        }
+        return;
+      }
+    }
     const p = await api.platform();
     if (typeof p === "string") document.body.dataset.platform = p;
   } catch (_) { /* best effort */ }

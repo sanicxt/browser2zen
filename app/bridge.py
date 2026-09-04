@@ -223,6 +223,16 @@ class Bridge:
             return "win"
         return "linux"
 
+    def system_info(self) -> dict:
+        """Return friendly platform, arch, and detected theme for the frontend."""
+        from .theme import get_platform_info
+        return get_platform_info()
+
+    def get_theme(self) -> str:
+        """Return detected OS theme ('dark' or 'light')."""
+        from .theme import detect_system_theme
+        return detect_system_theme()
+
     def version(self) -> str:
         """Return the canonical app version string (e.g. ``"1.1.0"``)."""
         try:

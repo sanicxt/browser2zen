@@ -156,9 +156,14 @@ _COOKIE_ERROR_MESSAGES = {
         "macOS hides Safari's cookie store behind Full Disk Access. "
         "Open System Settings, Privacy & Security, Full Disk Access, enable "
         "browser2zen, then click Recheck.",
-    # Both
+    # Linux Secret Service
+    "secret_service_denied":
+        "Linux Secret Service / Keyring access was denied; cookies skipped.",
+    "secret_service_missing":
+        "Could not retrieve {source} Safe Storage key from Linux Secret Service; cookies skipped.",
+    # All platforms
     "unsupported_platform":
-        "Cookie import only supports macOS and Windows.",
+        "Cookie import only supports macOS, Windows, and Linux.",
     "cookies_db_missing":
         "Zen cookies.sqlite was not found.",
 }
@@ -524,6 +529,7 @@ class MigrationOrchestrator:
                         keychain_service=getattr(self.source, "keychain_service", "Arc Safe Storage"),
                         keychain_account=getattr(self.source, "keychain_account", "Arc"),
                         local_state_paths=self.source.local_state_paths(),
+                        linux_app_names=getattr(self.source, "linux_app_names", ()),
                     )
                 summary = c.import_cookies()
                 if summary.get("error"):

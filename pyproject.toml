@@ -41,3 +41,9 @@ ignore = [
 "src/arc_pinned_tab_extractor.py" = ["E501", "B", "E701", "E722", "F841", "UP028", "UP035", "W293"]
 "src/zen_*.py" = ["E501", "B", "UP035", "E722", "B904"]
 "src/chromium_*.py" = ["E501", "UP035"]
+
+[dependency-groups]
+dev = [
+    "cryptography>=42.0.0",
+    "lz4>=4.0.0",
+]

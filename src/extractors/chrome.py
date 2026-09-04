@@ -23,6 +23,7 @@ class ChromeExtractor(ChromiumExtractor):
 
     keychain_service = "Chrome Safe Storage"
     keychain_account = "Chrome"
+    linux_app_names = ("chrome", "google-chrome", "chromium", "Chrome")
 
     macos_app_name = "Google Chrome"
     macos_process_paths = ("Google Chrome.app/Contents/MacOS/Google Chrome",)

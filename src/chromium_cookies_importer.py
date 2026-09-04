@@ -97,6 +97,171 @@ def _derive_aes_key_macos(password: str) -> bytes:
     return kdf.derive(password.encode("utf-8"))
 
 
+def _read_secret_service_password(app_names: list[str] | tuple[str, ...] | None = None) -> str | None:
+    """Fetch the per-app Chromium safe-storage key from Linux Secret Service.
+
+    Tries ``secret-tool lookup`` across standard application attributes and schemas,
+    and falls back to ``gi.repository.Secret`` if available.
+    """
+    candidates = list(app_names or [])
+    if not candidates:
+        candidates = ["chromium", "chrome", "brave"]
+
+    # 1. Try secret-tool lookup via subprocess
+    secret_tool_available = True
+    for app in candidates:
+        if not secret_tool_available:
+            break
+        attempts = [
+            ["secret-tool", "lookup", "application", app],
+            ["secret-tool", "lookup", "xdg:schema", "chrome_libsecret_os_crypt_password_v2", "application", app],
+            ["secret-tool", "lookup", "xdg:schema", "chrome_libsecret_os_crypt_password", "application", app],
+        ]
+        for cmd in attempts:
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0 and result.stdout.strip():
+                    return result.stdout.strip()
+            except FileNotFoundError:
+                secret_tool_available = False
+                break
+            except (subprocess.TimeoutExpired, OSError):
+                break
+
+    # 2. Try gi.repository.Secret if available
+    try:
+        import gi
+        gi.require_version("Secret", "1")
+        from gi.repository import Secret
+
+        for schema_name in ("chrome_libsecret_os_crypt_password_v2", "chrome_libsecret_os_crypt_password"):
+            schema = Secret.Schema.new(
+                schema_name,
+                Secret.SchemaFlags.NONE,
+                {"application": Secret.SchemaAttributeType.STRING},
+            )
+            for app in candidates:
+                pwd = Secret.password_lookup_sync(schema, {"application": app}, None)
+                if pwd:
+                    return pwd
+    except Exception:
+        pass
+
+    return None
+
+
+def _read_kwallet_password(app_names: list[str] | tuple[str, ...] | None = None) -> str | None:
+    """Fetch Chromium Safe Storage password from KDE KWallet via kwallet-query if available."""
+    candidates = list(app_names or [])
+    if not candidates:
+        candidates = ["brave", "chrome", "chromium"]
+
+    folders = []
+    entries = []
+    for app in candidates:
+        cap = app.capitalize()
+        folders.extend([f"{cap} Keys", "Chromium Keys", "Chrome Keys"])
+        entries.extend([f"{cap} Safe Storage", "Chromium Safe Storage", "Chrome Safe Storage"])
+
+    seen_f: set[str] = set()
+    unique_folders = [f for f in folders if not (f in seen_f or seen_f.add(f))]
+    seen_e: set[str] = set()
+    unique_entries = [e for e in entries if not (e in seen_e or seen_e.add(e))]
+
+    kwallet_query_available = True
+    for folder in unique_folders:
+        if not kwallet_query_available:
+            break
+        for entry in unique_entries:
+            if not kwallet_query_available:
+                break
+            for wallet in ("kdewallet", ""):
+                cmd = ["kwallet-query", "-f", folder, "-r", entry]
+                if wallet:
+                    cmd.append(wallet)
+                try:
+                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                    if r.returncode == 0 and r.stdout.strip():
+                        return r.stdout.strip()
+                except FileNotFoundError:
+                    kwallet_query_available = False
+                    break
+                except (subprocess.TimeoutExpired, OSError):
+                    break
+
+    # Direct DBus query if kwallet-query CLI is not installed
+    try:
+        import dbus
+
+        bus = dbus.SessionBus()
+        for svc, path in (
+            ("org.kde.kwalletd6", "/modules/kwalletd6"),
+            ("org.kde.kwalletd5", "/modules/kwalletd5"),
+            ("org.kde.kwalletd", "/modules/kwalletd"),
+        ):
+            if not bus.name_has_owner(svc):
+                continue
+            proxy = bus.get_object(svc, path)
+            iface = dbus.Interface(proxy, "org.kde.KWallet")
+            wallet = str(iface.networkWallet() or "kdewallet")
+            handle = iface.open(wallet, dbus.Int64(0), "browser2zen")
+            if handle < 0:
+                continue
+            try:
+                for folder in unique_folders:
+                    if iface.hasFolder(handle, folder, "browser2zen"):
+                        for entry in unique_entries:
+                            if iface.hasEntry(handle, folder, entry, "browser2zen"):
+                                val = str(iface.readPassword(handle, folder, entry, "browser2zen")).strip()
+                                if val:
+                                    return val
+            finally:
+                iface.close(handle, False, "browser2zen")
+    except Exception:
+        pass
+
+    return None
+
+
+def _read_linux_password(app_names: list[str] | tuple[str, ...] | None = None) -> str | None:
+    """Fetch Chromium safe-storage password from Linux Secret Service or KDE KWallet."""
+    # 1. Secret Service API (GNOME Keyring, modern KDE Plasma 5/6 KWallet Secret Service, XDG Portal)
+    pwd = _read_secret_service_password(app_names)
+    if pwd:
+        return pwd
+
+    # 2. KDE KWallet via kwallet-query CLI
+    pwd = _read_kwallet_password(app_names)
+    if pwd:
+        return pwd
+
+    return None
+
+
+def _derive_aes_key_linux(password: str) -> bytes:
+    """Chromium on Linux: PBKDF2-HMAC-SHA1, salt='saltysalt', iterations=1, keylen=16."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA1(),
+        length=16,
+        salt=b"saltysalt",
+        iterations=1,
+    )
+    return kdf.derive(password.encode("utf-8"))
+
+
+_PEANUTS_KEY_LINUX: bytes | None = None
+
+
+def _get_peanuts_key_linux() -> bytes:
+    global _PEANUTS_KEY_LINUX
+    if _PEANUTS_KEY_LINUX is None:
+        _PEANUTS_KEY_LINUX = _derive_aes_key_linux("peanuts")
+    return _PEANUTS_KEY_LINUX
+
+
 def _decrypt_v10_cbc(blob: bytes, key: bytes) -> bytes | None:
     """macOS path. Strip 'v10' magic, AES-128-CBC decrypt with all-spaces IV, PKCS7 unpad."""
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -114,6 +279,44 @@ def _decrypt_v10_cbc(blob: bytes, key: bytes) -> bytes | None:
     if 0 < pad <= 16 and padded.endswith(bytes([pad]) * pad):
         padded = padded[:-pad]
     return padded
+
+
+def _decrypt_v10_v11_linux(blob: bytes, key: bytes) -> bytes | None:
+    """Linux path. Strip 'v10' or 'v11' magic, AES-128-CBC decrypt with all-spaces IV, PKCS7 unpad.
+
+    'v11' blobs use the key derived from the OS secret service password.
+    'v10' blobs use the key derived from the hardcoded fallback password 'peanuts'.
+    """
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+    if blob.startswith(b"v11"):
+        dec_key = key
+    elif blob.startswith(b"v10"):
+        dec_key = _get_peanuts_key_linux()
+    else:
+        return None
+
+    ciphertext = blob[3:]
+    if len(ciphertext) % 16 != 0:
+        return None
+    iv = b" " * 16
+
+    def _try_decrypt(k: bytes) -> bytes | None:
+        cipher = Cipher(algorithms.AES(k), modes.CBC(iv))
+        decryptor = cipher.decryptor()
+        try:
+            padded = decryptor.update(ciphertext) + decryptor.finalize()
+        except Exception:
+            return None
+        pad = padded[-1] if padded else 0
+        if 0 < pad <= 16 and padded.endswith(bytes([pad]) * pad):
+            return padded[:-pad]
+        return None
+
+    pt = _try_decrypt(dec_key)
+    if pt is None and dec_key != key:
+        pt = _try_decrypt(key)
+    return pt
 
 
 # ---------- Windows DPAPI master-key unwrap ----------
@@ -260,7 +463,11 @@ def _strip_host_hash(plaintext: bytes) -> bytes:
 
     We don't know up-front which builds use it. Heuristic: if the first 32 bytes
     are non-printable and the remainder is printable, drop the tag.
+    If the plaintext is exactly 32 non-printable bytes, the cookie value was empty.
     """
+    if len(plaintext) == 32:
+        if any(b < 0x20 or b > 0x7E for b in plaintext):
+            return b""
     if len(plaintext) < 33:
         return plaintext
     head, tail = plaintext[:32], plaintext[32:]
@@ -277,7 +484,7 @@ _SAMESITE_MAP = {-1: 3, 0: 0, 1: 1, 2: 2}
 
 
 def _cookie_dbs_default() -> list[Path]:
-    """Locate every supported source-browser profile's Cookies SQLite across both supported OSes.
+    """Locate every supported source-browser profile's Cookies SQLite across supported OSes.
 
     Newer Chromium builds nest the file as ``<profile>/Network/Cookies``;
     older builds keep it at ``<profile>/Cookies``. We accept either.
@@ -292,6 +499,14 @@ def _cookie_dbs_default() -> list[Path]:
                  / "LocalCache/Local/Arc/User Data"
         )
         roots.append(home / "AppData/Local/Arc/User Data")
+    elif sys.platform.startswith("linux"):
+        roots.extend([
+            home / ".config/BraveSoftware/Brave-Browser",
+            home / ".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser",
+            home / ".config/google-chrome",
+            home / ".var/app/com.google.Chrome/config/google-chrome",
+            home / ".config/chromium",
+        ])
 
     found: list[Path] = []
     for root in roots:
@@ -322,6 +537,7 @@ class CookiesImporter:
         keychain_service: str = "Arc Safe Storage",
         keychain_account: str = "Arc",
         local_state_paths: list[Path] | None = None,
+        linux_app_names: list[str] | tuple[str, ...] | None = None,
     ):
         # ``cookie_dbs`` injects per-browser cookie SQLite paths; the
         # other three knobs let any Chromium browser (Chrome/Edge/Brave)
@@ -337,6 +553,9 @@ class CookiesImporter:
         self._keychain_account = keychain_account
         self._local_state_paths: list[Path] | None = (
             [Path(p) for p in local_state_paths] if local_state_paths is not None else None
+        )
+        self._linux_app_names = (
+            list(linux_app_names) if linux_app_names is not None else None
         )
         self._tempdir: Path | None = None
 
@@ -420,7 +639,7 @@ class CookiesImporter:
     def _resolve_key_and_decrypt_fn(self) -> tuple[bytes, Callable[[bytes, bytes], bytes | None], str | None]:
         """Return ``(key, decrypt_fn, None)`` on success or ``(b"", noop, error_code)``.
 
-        Hides macOS Keychain vs Windows DPAPI behind a single dispatch.
+        Dispatches across macOS Keychain, Windows DPAPI, and Linux Secret Service.
         """
         if sys.platform == "darwin":
             password = _read_keychain_password(
@@ -438,6 +657,51 @@ class CookiesImporter:
                 logger.error(f"DPAPI key unwrap failed: {exc} ({exc.code})")
                 return b"", _decrypt_v10_gcm, exc.code
             return key, _decrypt_v10_gcm, None
+
+        if sys.platform.startswith("linux"):
+            candidates: list[str] = []
+            if self._linux_app_names:
+                candidates.extend(self._linux_app_names)
+            if self._keychain_account:
+                candidates.append(self._keychain_account.lower())
+                candidates.append(self._keychain_account)
+            # Deduplicate preserving order
+            seen: set[str] = set()
+            unique_candidates = [c for c in candidates if not (c in seen or seen.add(c))]
+
+            password = _read_linux_password(unique_candidates)
+            if password is not None:
+                return _derive_aes_key_linux(password), _decrypt_v10_v11_linux, None
+
+            # If no Secret Service password found, check whether v11 cookies exist
+            cookie_dbs = (
+                [p for p in self._injected_dbs if p.is_file()]
+                if self._injected_dbs is not None
+                else _cookie_dbs_default()
+            )
+            has_v11 = False
+            for db in cookie_dbs:
+                try:
+                    conn = sqlite3.connect(f"file:{db}?mode=ro&immutable=1", uri=True)
+                    try:
+                        row = conn.execute(
+                            "SELECT 1 FROM cookies WHERE encrypted_value LIKE 'v11%' LIMIT 1"
+                        ).fetchone()
+                        if row:
+                            has_v11 = True
+                            break
+                    finally:
+                        conn.close()
+                except Exception:
+                    pass
+
+            if has_v11:
+                logger.error("Secret Service safe storage key missing for v11 cookies.")
+                return b"", _decrypt_v10_v11_linux, "secret_service_missing"
+
+            # Fall back to Linux 'peanuts' key for v10
+            logger.info("Falling back to Linux default 'peanuts' key for cookie decryption.")
+            return _derive_aes_key_linux("peanuts"), _decrypt_v10_v11_linux, None
 
         return b"", _decrypt_v10_cbc, "unsupported_platform"
 

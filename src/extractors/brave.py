@@ -29,10 +29,13 @@ class BraveExtractor(ChromiumExtractor):
         "snap/brave/current/.config/BraveSoftware/Brave-Browser",
         # Flatpak (com.brave.Browser).
         ".var/app/com.brave.Browser/config/BraveSoftware/Brave-Browser",
+        ".var/app/com.brave.Browser.beta/config/BraveSoftware/Brave-Browser-Beta",
+        ".var/app/com.brave.Browser.nightly/config/BraveSoftware/Brave-Browser-Nightly",
     )
 
     keychain_service = "Brave Safe Storage"
     keychain_account = "Brave"
+    linux_app_names = ("brave", "brave-browser", "Brave")
 
     macos_app_name = "Brave Browser"
     macos_process_paths = ("Brave Browser.app/Contents/MacOS/Brave Browser",)
