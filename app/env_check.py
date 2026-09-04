@@ -25,6 +25,7 @@ class ZenProfile:
     path: Path
     is_release: bool          # cheap heuristic: name contains "release"
     has_zen_sessions: bool    # zen-sessions.jsonlz4 exists (modern format)
+    install: str = ""         # "", "XDG" or "Flatpak" — qualifies the picker
 
 
 @dataclass(frozen=True)
@@ -111,23 +112,41 @@ def _arc_profiles(user_data: Path | None) -> list[str]:
 # ---------- Zen ----------
 
 
-def _zen_profiles_root() -> Path:
-    home = Path.home()
-    if sys.platform == "darwin":
-        return home / "Library/Application Support/zen/Profiles"
-    if os.name == "nt":
-        return home / "AppData/Roaming/zen/Profiles"
-    return home / ".zen"
+def _xdg_config_home() -> Path:
+    """Resolve ``$XDG_CONFIG_HOME``, defaulting to ``~/.config``.
+
+    XDG-aware builds (common on Arch) keep browser data under
+    ``$XDG_CONFIG_HOME`` instead of the classic dotdir; honour the
+    variable when the user sets it.
+    """
+    env = os.environ.get("XDG_CONFIG_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".config"
 
 
-def _zen_root() -> Path:
-    """The zen data root (parent of Profiles/ on macOS/Windows)."""
+def _zen_profiles_roots() -> list[tuple[str, Path]]:
+    """Every plausible Zen profiles root, each with a short install label.
+
+    The label disambiguates the picker when the same profile name exists
+    under more than one root (a native Zen and a Flatpak Zen side by
+    side). It is empty for the classic location, which is the common
+    case and needs no qualifier.
+    """
     home = Path.home()
     if sys.platform == "darwin":
-        return home / "Library/Application Support/zen"
+        return [("", home / "Library/Application Support/zen/Profiles")]
     if os.name == "nt":
-        return home / "AppData/Roaming/zen"
-    return home / ".zen"
+        return [("", home / "AppData/Roaming/zen/Profiles")]
+    return [
+        ("", home / ".zen"),
+        # XDG-aware builds (common on Arch) put the root under
+        # $XDG_CONFIG_HOME instead of the classic dotdir.
+        ("XDG", _xdg_config_home() / "zen"),
+        # Flatpak (app.zen_browser.zen) keeps its data under the sandbox
+        # home, not the host ~/.zen or ~/.config/zen.
+        ("Flatpak", home / ".var/app/app.zen_browser.zen/.zen"),
+    ]
 
 
 def _profile_names_from_ini(root: Path) -> dict[str, str]:
@@ -198,35 +217,61 @@ def _profile_names_from_profile_groups(root: Path) -> dict[str, str]:
 
 
 def list_zen_profiles() -> list[ZenProfile]:
-    root = _zen_profiles_root()
-    if not root.is_dir():
-        return []
-    # Display names, best-effort: Zen's unified-profiles DB (the menubar
-    # names, modern Zen) first — profiles.ini may carry stale legacy
-    # names there. profiles.ini next for classic installs; directory-name
-    # parsing is the last resort.
-    ini_names = _profile_names_from_ini(_zen_root())
-    group_names = _profile_names_from_profile_groups(_zen_root())
+    """Every live Zen profile across every candidate root.
+
+    We scan all roots rather than picking one, for two reasons: a stale
+    ``~/.zen`` left by an uninstalled Zen must not shadow a live profile
+    elsewhere, and a machine can genuinely run a native Zen and a Flatpak
+    Zen at once. Both then show up in the profile picker instead of the
+    tool silently choosing for the user.
+
+    Display names, best-effort per root: Zen's unified-profiles DB (the
+    menubar names, modern Zen) first — profiles.ini may carry stale
+    legacy names there. profiles.ini next for classic installs;
+    directory-name parsing is the last resort.
+    """
     result: list[ZenProfile] = []
-    for entry in sorted(root.iterdir()):
-        if not entry.is_dir():
+    seen: set[Path] = set()
+    for install, root in _zen_profiles_roots():
+        if not root.is_dir():
             continue
-        # Heuristic: a real profile has at least places.sqlite
-        if not (entry / "places.sqlite").is_file():
+        # profiles.ini + Profile Groups live at the zen data root: the
+        # parent of Profiles/ on macOS/Windows, the profiles root itself
+        # on Linux layouts where profiles sit directly under it.
+        data_root = root.parent if root.name == "Profiles" else root
+        names = _profile_names_from_profile_groups(data_root)
+        for key, value in _profile_names_from_ini(data_root).items():
+            names.setdefault(key, value)
+        try:
+            entries = sorted(root.iterdir())
+        except OSError:
             continue
-        rel = entry.relative_to(_zen_root()).as_posix()
-        name = group_names.get(rel) or ini_names.get(rel)
-        if not name:
-            name = entry.name.split(".", 1)[1] if "." in entry.name else entry.name
-        result.append(
-            ZenProfile(
-                name=name,
-                path=entry,
-                is_release="release" in entry.name.lower(),
-                has_zen_sessions=(entry / "zen-sessions.jsonlz4").is_file(),
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            # Heuristic: a real profile has at least places.sqlite
+            if not (entry / "places.sqlite").is_file():
+                continue
+            resolved = entry.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            rel = entry.relative_to(data_root).as_posix()
+            name = names.get(rel)
+            if not name:
+                name = entry.name.split(".", 1)[1] if "." in entry.name else entry.name
+            result.append(
+                ZenProfile(
+                    name=name,
+                    path=entry,
+                    is_release="release" in entry.name.lower(),
+                    has_zen_sessions=(entry / "zen-sessions.jsonlz4").is_file(),
+                    install=install,
+                )
             )
-        )
-    # Prefer release-labelled profiles first
+    # Prefer release-labelled profiles first. The sort is stable, so
+    # within a tie the root order above wins (classic before XDG before
+    # Flatpak), keeping single-install machines on their old profile.
     result.sort(key=lambda p: (not p.is_release, p.name.lower()))
     return result
 
@@ -400,6 +445,7 @@ def env_report_to_dict(report: EnvReport) -> dict:
                 "path": str(p.path),
                 "isRelease": p.is_release,
                 "hasZenSessions": p.has_zen_sessions,
+                "install": p.install,
             }
             for p in report.zen_profiles
         ],
