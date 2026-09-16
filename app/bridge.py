@@ -294,7 +294,7 @@ class Bridge:
     def is_zen_running(self) -> bool:
         # Used by the backup/restore screens to gate the action. Cheaper
         # than ``check_env`` since it skips source-browser detection.
-        from env_check import is_zen_running as _is_zen_running
+        from .env_check import is_zen_running as _is_zen_running
         try:
             return bool(_is_zen_running())
         except Exception:

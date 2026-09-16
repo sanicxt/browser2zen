@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import tarfile
 import tempfile
@@ -101,6 +102,37 @@ DEFAULT_CATEGORIES = ("workspaces", "browsing", "cookies", "favicons", "mods")
 # SQLite file suffixes that must travel with the main file.
 _SQLITE_SIBLINGS = ("-wal", "-shm", "-journal")
 
+# Prefixes scrubbed out of a restored ``prefs.js``. These carry the SOURCE
+# profile's machine/account identity, not user data:
+#
+#  * ``services.sync.*`` / ``identity.fxaccounts.*`` — the Mozilla account
+#    the source was signed into. Restoring them makes the target sign into
+#    that same account on next launch, and Sync then *overwrites* the
+#    imported workspaces/sessions from the cloud — the profile appears to
+#    lose everything and a second restore fights the now-active Sync.
+#  * ``toolkit.profiles.*`` / ``browser.profiles.*`` — the unified-profile
+#    registration (storeID, names, "created" flags). If these come from
+#    another install they can make Zen no longer associate the profile.
+#  * ``browser.laterrun.*`` / ``datareporting.dau.*`` / ``nimbus.profileId``
+#    / ``toolkit.telemetry.cachedProfileGroupID`` — per-install telemetry
+#    identity.
+#  * ``extensions.webextensions.uuids`` — the storage UUID map for the
+#    source profile; stale entries corrupt extension storage on the target.
+_SOURCE_IDENTITY_PREF_PREFIXES = (
+    "services.sync.",
+    "identity.fxaccounts.",
+    "toolkit.profiles.",
+    "browser.profiles.",
+    "browser.laterrun.",
+    "datareporting.dau.",
+    "toolkit.telemetry.cachedProfileGroupID",
+    "nimbus.profileId",
+    "extensions.webextensions.uuids",
+)
+
+# ``user_pref("name", value);`` — captures the name so we can prefix-match.
+_USER_PREF_RE = re.compile(r'^user_pref\("([^"]+)"')
+
 
 # --------------------------------------------------------------------- helpers
 
@@ -125,6 +157,172 @@ def _sqlite_sibling_paths(src: Path) -> list[Path]:
 def _archive_member(rel_path: str) -> str:
     """Where this file lives inside the archive."""
     return f"profile/{rel_path}"
+
+
+def _is_source_identity_pref(name: str) -> bool:
+    """Whether a ``user_pref`` name holds the source profile's identity."""
+    return name.startswith(_SOURCE_IDENTITY_PREF_PREFIXES)
+
+
+def _scrub_prefs_text(text: str) -> str:
+    """Drop the source profile's account/identity/sync prefs from ``prefs.js``.
+
+    Keeps every genuine user preference; only strips the lines that would
+    either re-bind the target to the source's Mozilla account (Sync then
+    clobbers the imported data) or tie the target to the source install's
+    profile registration.
+    """
+    kept: list[str] = []
+    for line in text.splitlines():
+        match = _USER_PREF_RE.match(line.lstrip())
+        if match and _is_source_identity_pref(match.group(1)):
+            continue
+        kept.append(line)
+    return "\n".join(kept) + "\n"
+
+
+def _identity_pref_lines(text: str) -> list[str]:
+    """Extract the identity/registration ``user_pref`` lines from a prefs.js."""
+    out: list[str] = []
+    for line in text.splitlines():
+        match = _USER_PREF_RE.match(line.lstrip())
+        if match and _is_source_identity_pref(match.group(1)):
+            out.append(line)
+    return out
+
+
+def _merge_prefs_text(source_text: str, target_text: str | None,
+                      fallback_store_id: str | None = None) -> str:
+    """Merge the source's user prefs over the target's own identity.
+
+    The source profile's account/sync/profile-registration lines are
+    dropped; the TARGET profile's own such lines are kept verbatim on top
+    so Zen still associates the profile with this install's Profile
+    Groups store (a foreign ``toolkit.profiles.storeID`` makes the
+    profile vanish from Zen after a restart).
+
+    ``fallback_store_id`` is used when the target has no storeID of its
+    own yet — we derive it from the install's ``Profile Groups/`` so the
+    restored profile is still registered with the right store.
+    """
+    scrubbed = _scrub_prefs_text(source_text).rstrip("\n")
+    target_identity = _identity_pref_lines(target_text) if target_text else []
+    if not any("toolkit.profiles.storeID" in line for line in target_identity):
+        if fallback_store_id:
+            target_identity.append(
+                f'user_pref("toolkit.profiles.storeID", "{fallback_store_id}");'
+            )
+    if not target_identity:
+        return scrubbed + "\n"
+    return scrubbed + "\n" + "\n".join(target_identity) + "\n"
+
+
+def _resolve_target_store_id(target_profile: Path) -> str | None:
+    """Find the ``Profile Groups/<storeID>`` this install uses.
+
+    Prefers the store that already lists ``target_profile``; falls back to
+    the sole store when there's exactly one. Returns ``None`` when the
+    directory is absent or ambiguous.
+    """
+    groups_dir = target_profile.parent / "Profile Groups"
+    if not groups_dir.is_dir():
+        return None
+    stores = [db for db in sorted(groups_dir.glob("*.sqlite"))
+              if not db.name.endswith(("-wal", "-shm"))]
+    if not stores:
+        return None
+    target_name = target_profile.name
+    fallback: str | None = None
+    for db in stores:
+        try:
+            import sqlite3
+            conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=1)
+            try:
+                rows = conn.execute("SELECT path FROM Profiles").fetchall()
+            finally:
+                conn.close()
+        except Exception:
+            continue
+        paths = {str(r[0]) for r in rows if r and r[0]}
+        if any(p == target_name or p.endswith("/" + target_name) for p in paths):
+            return db.stem
+        fallback = db.stem
+    return fallback if len(stores) == 1 else None
+
+
+def _scrub_logins_json(data: bytes) -> bytes:
+    """Drop the source's Mozilla-account credential from ``logins.json``.
+
+    The signed-in Firefox Account lives as a ``chrome://FirefoxAccounts``
+    login. Restoring it would silently re-bind the target to the source's
+    Sync account (clobbering the imported data); the user can sign in
+    fresh. Every real website credential is kept.
+    """
+    try:
+        doc = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return data
+    logins = doc.get("logins")
+    if isinstance(logins, list):
+        doc["logins"] = [
+            entry for entry in logins
+            if not (isinstance(entry, dict)
+                    and str(entry.get("hostname", "")).startswith("chrome://FirefoxAccounts"))
+        ]
+    return json.dumps(doc).encode("utf-8")
+
+
+def _scrub_extensions_json(data: bytes, target_profile: Path) -> bytes:
+    """Re-point source-machine absolute paths in ``extensions.json``.
+
+    The addon entries are fine; their ``path``/``rootURI`` point at the
+    SOURCE profile directory though, which doesn't exist on the target.
+    Rewrite the directory prefix to this target profile's ``extensions``
+    dir so the enabled/disabled state still applies (Firefox expects
+    absolute paths here).
+    """
+    try:
+        doc = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return data
+
+    target_ext_dir = str(target_profile / "extensions")
+    target_quoted = target_ext_dir.replace(" ", "%20")
+
+    def _fix(value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        # Plain absolute path: ``<prefix>/extensions/<file>.xpi``
+        marker = "/extensions/"
+        idx = value.find(marker)
+        if idx != -1 and not value.startswith("jar:"):
+            return target_ext_dir + "/" + value[idx + len(marker):]
+        # Packed jar rootURI: ``jar:file://<prefix>/extensions/<file>.xpi!/``
+        jidx = value.find("/extensions/")
+        if value.startswith("jar:") and jidx != -1:
+            return "jar:file://" + target_quoted + "/" + value[jidx + len("/extensions/"):]
+        # URL-encoded prefix that isn't a jar rootURI.
+        eidx = value.find("extensions/")
+        if eidx != -1 and ("/" in value[:eidx]):
+            return target_quoted + "/" + value[eidx + len("extensions/"):]
+        return value
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            for key, val in node.items():
+                if key in ("path", "rootURI", "resourceURI", "descriptor"):
+                    node[key] = _fix(val)
+                else:
+                    walk(val)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    try:
+        walk(doc)
+    except Exception:
+        return data
+    return json.dumps(doc).encode("utf-8")
 
 
 # --------------------------------------------------------------------- exporter
@@ -381,7 +579,28 @@ class ZenBackupImporter:
                     if fh is None:
                         result["skipped"].append({"file": rel, "reason": "unreadable"})
                         continue
-                    target_path.write_bytes(fh.read())
+                    payload = fh.read()
+                    # Scrub source-profile identity / machine state that must
+                    # never follow a restore: a signed-in source's Sync would
+                    # otherwise clobber the imported data on next launch, and
+                    # a foreign profile-registration storeID makes Zen drop
+                    # the profile after a restart.
+                    if rel == "prefs.js":
+                        existing = None
+                        if target_path.is_file():
+                            try:
+                                existing = target_path.read_text("utf-8", "replace")
+                            except OSError:
+                                existing = None
+                        payload = _merge_prefs_text(
+                            payload.decode("utf-8", "replace"), existing,
+                            fallback_store_id=_resolve_target_store_id(self.target),
+                        ).encode("utf-8")
+                    elif rel == "extensions.json":
+                        payload = _scrub_extensions_json(payload, self.target)
+                    elif rel == "logins.json":
+                        payload = _scrub_logins_json(payload)
+                    target_path.write_bytes(payload)
                     result["restored_files"].append(rel)
 
                     # Drop any stale wal/shm so SQLite re-reads the new

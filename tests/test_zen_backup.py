@@ -24,6 +24,10 @@ from zen_backup import (
     DEFAULT_CATEGORIES,
     ZenBackupExporter,
     ZenBackupImporter,
+    _merge_prefs_text,
+    _scrub_extensions_json,
+    _scrub_logins_json,
+    _scrub_prefs_text,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -344,3 +348,172 @@ def test_unknown_category_is_skipped_not_fatal(source_profile, empty_profile, tm
     assert "future-cat" in skipped_cats
     # The known categories still land.
     assert (empty_profile / "places.sqlite").is_file()
+
+
+# ----- source-profile identity is never propagated on restore -------------
+
+_PREFS = (
+    'user_pref("browser.startup.homepage", "https://example.com");\n'
+    'user_pref("services.sync.username", "someone@example.com");\n'
+    'user_pref("services.sync.engine.spaces", true);\n'
+    'user_pref("identity.fxaccounts.account.device.name", "source laptop");\n'
+    'user_pref("toolkit.profiles.storeID", "355e414e");\n'
+    'user_pref("browser.profiles.enabled", true);\n'
+    'user_pref("datareporting.dau.cachedUsageProfileID", "abc");\n'
+    'user_pref("nimbus.profileId", "def");\n'
+    'user_pref("extensions.webextensions.uuids", "{\\"x\\":\\"y\\"}");\n'
+)
+
+
+def test_scrub_prefs_keeps_user_prefs_drops_identity():
+    out = _scrub_prefs_text(_PREFS)
+    assert 'browser.startup.homepage' in out
+    for leaked in (
+        "services.sync.", "identity.fxaccounts.", "toolkit.profiles.storeID",
+        "browser.profiles.enabled", "datareporting.dau.", "nimbus.profileId",
+        "extensions.webextensions.uuids",
+    ):
+        assert leaked not in out
+
+
+def test_merge_prefs_preserves_target_identity():
+    target = (
+        'user_pref("toolkit.profiles.storeID", "targetstore");\n'
+        'user_pref("services.sync.username", "target@example.com");\n'
+    )
+    out = _merge_prefs_text(_PREFS, target)
+    # Source identity gone, target identity preserved verbatim.
+    assert "someone@example.com" not in out
+    assert 'toolkit.profiles.storeID", "targetstore"' in out
+    assert "target@example.com" in out
+    # User prefs survive.
+    assert "browser.startup.homepage" in out
+
+
+def test_scrub_logins_drops_firefox_account_credential():
+    logins = json.dumps({
+        "logins": [
+            {"hostname": "chrome://FirefoxAccounts", "encryptedPassword": "x"},
+            {"hostname": "https://example.com", "encryptedPassword": "keep"},
+        ],
+        "potentiallyVulnerablePasswords": [],
+    }).encode("utf-8")
+    out = json.loads(_scrub_logins_json(logins).decode("utf-8"))
+    hosts = [entry["hostname"] for entry in out["logins"]]
+    assert hosts == ["https://example.com"]
+
+
+def test_scrub_extensions_repoints_source_paths():
+    exts = json.dumps({
+        "addons": [{
+            "id": "uBlock0@raymondhill.net",
+            "path": "/home/source/.zen/tsibjxyu.Default (release)/extensions/uBlock0@raymondhill.net.xpi",
+            "rootURI": "jar:file:///home/source/.zen/tsibjxyu.Default%20(release)/extensions/uBlock0@raymondhill.net.xpi!/",
+        }],
+    }).encode("utf-8")
+    target = Path("/tmp/target-profile")
+    out = json.loads(_scrub_extensions_json(exts, target).decode("utf-8"))
+    addon = out["addons"][0]
+    assert addon["path"] == "/tmp/target-profile/extensions/uBlock0@raymondhill.net.xpi"
+    assert addon["rootURI"] == (
+        "jar:file:///tmp/target-profile/extensions/uBlock0@raymondhill.net.xpi!/"
+    )
+    assert "source" not in addon["path"]
+
+
+def test_restore_scrubs_identity_end_to_end(source_profile, empty_profile, tmp_path):
+    # Seed the source profile with a signed-in prefs.js + FxA login, and a
+    # target whose own identity must survive.
+    (source_profile / "prefs.js").write_text(_PREFS)
+    (source_profile / "logins.json").write_text(json.dumps({
+        "logins": [{"hostname": "chrome://FirefoxAccounts", "encryptedPassword": "x"}],
+    }))
+    (empty_profile / "prefs.js").write_text(
+        'user_pref("toolkit.profiles.storeID", "targetstore");\n'
+    )
+
+    archive = tmp_path / "identity.zenbackup"
+    ZenBackupExporter(source_profile, archive,
+                      includes=["prefs", "passwords"]).export()
+    result = ZenBackupImporter(archive, empty_profile,
+                               includes=["prefs", "passwords"]).import_archive()
+    assert result["ok"], result
+
+    restored_prefs = (empty_profile / "prefs.js").read_text()
+    assert "services.sync.username" not in restored_prefs
+    assert "identity.fxaccounts." not in restored_prefs
+    assert 'toolkit.profiles.storeID", "targetstore"' in restored_prefs
+
+    restored_logins = json.loads((empty_profile / "logins.json").read_text())
+    assert all(entry["hostname"] != "chrome://FirefoxAccounts"
+               for entry in restored_logins["logins"])
+
+
+def test_restore_preserves_flatpak_profile_storeid(source_profile, empty_profile, tmp_path):
+    """A restore must not replace the target install's unified-profile storeID.
+
+    Flatpak Zen keeps its profiles directly under ``.zen`` and registers
+    them in ``Profile Groups/<storeID>.sqlite``. The profile's ``prefs.js``
+    carries the matching ``toolkit.profiles.storeID``. Overwriting it with
+    the source's storeID points Zen at a store that doesn't exist and the
+    profile list goes blank after restart (the reported bug).
+    """
+    (source_profile / "prefs.js").write_text(
+        'user_pref("services.sync.username", "signedin@example.com");\n'
+        'user_pref("toolkit.profiles.storeID", "355e414e");\n'
+        'user_pref("browser.startup.homepage", "https://example.com");\n'
+    )
+    (empty_profile / "prefs.js").write_text(
+        'user_pref("toolkit.profiles.storeID", "da222999");\n'
+    )
+
+    archive = tmp_path / "flatpak.zenbackup"
+    ZenBackupExporter(source_profile, archive, includes=["prefs"]).export()
+    result = ZenBackupImporter(archive, empty_profile,
+                               includes=["prefs"]).import_archive()
+    assert result["ok"], result
+
+    restored = (empty_profile / "prefs.js").read_text()
+    assert '"355e414e"' not in restored          # source storeID dropped
+    assert '"da222999"' in restored              # target storeID survives
+    assert "signedin@example.com" not in restored
+    assert "browser.startup.homepage" in restored
+
+
+def test_restore_injects_install_storeid_when_target_has_none(
+        source_profile, empty_profile, tmp_path):
+    """A fresh target without its own storeID still gets registered.
+
+    Derive the install storeID from ``Profile Groups/<id>.sqlite`` so the
+    restored profile isn't left pointing at the source's (foreign) store.
+    """
+    import sqlite3
+
+    (source_profile / "prefs.js").write_text(
+        'user_pref("toolkit.profiles.storeID", "355e414e");\n'
+        'user_pref("browser.startup.homepage", "https://example.com");\n'
+    )
+    # No target prefs.js at all, but this install has a store that lists
+    # the target profile by name.
+    groups = empty_profile.parent / "Profile Groups"
+    groups.mkdir(exist_ok=True)
+    conn = sqlite3.connect(groups / "deadbeef.sqlite")
+    conn.execute(
+        'CREATE TABLE "Profiles" (id INTEGER, path TEXT, name TEXT, avatar TEXT, '
+        "themeId TEXT, themeFg TEXT, themeBg TEXT)"
+    )
+    conn.execute("INSERT INTO Profiles VALUES (1, ?, 'Main', '', '', '', '')",
+                 (empty_profile.name,))
+    conn.commit()
+    conn.close()
+
+    archive = tmp_path / "storeid.zenbackup"
+    ZenBackupExporter(source_profile, archive, includes=["prefs"]).export()
+    result = ZenBackupImporter(archive, empty_profile,
+                               includes=["prefs"]).import_archive()
+    assert result["ok"], result
+
+    restored = (empty_profile / "prefs.js").read_text()
+    assert '"355e414e"' not in restored
+    assert 'toolkit.profiles.storeID", "deadbeef"' in restored
+    assert "browser.startup.homepage" in restored
